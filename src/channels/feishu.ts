@@ -52,8 +52,7 @@ export class FeishuChannel implements Channel {
       appId: this.appId,
       appSecret: this.appSecret,
       appType: lark.AppType.SelfBuild,
-      domain:
-        this.domain === 'lark' ? lark.Domain.Lark : lark.Domain.Feishu,
+      domain: this.domain === 'lark' ? lark.Domain.Lark : lark.Domain.Feishu,
     });
 
     // Resolve bot identity so we can detect @bot mentions
@@ -65,7 +64,10 @@ export class FeishuChannel implements Channel {
         params: {},
       });
       this.botOpenId = resp?.bot?.open_id || '';
-      logger.info({ botOpenId: this.botOpenId }, 'Feishu bot identity resolved');
+      logger.info(
+        { botOpenId: this.botOpenId },
+        'Feishu bot identity resolved',
+      );
     } catch (err) {
       logger.error({ err }, 'Failed to get Feishu bot info');
     }
@@ -82,8 +84,7 @@ export class FeishuChannel implements Channel {
       appId: this.appId,
       appSecret: this.appSecret,
       loggerLevel: lark.LoggerLevel.info,
-      domain:
-        this.domain === 'lark' ? lark.Domain.Lark : lark.Domain.Feishu,
+      domain: this.domain === 'lark' ? lark.Domain.Lark : lark.Domain.Feishu,
     });
 
     await this.wsClient.start({ eventDispatcher });
@@ -119,9 +120,7 @@ export class FeishuChannel implements Channel {
     const chatType: string = message.chat_type; // 'group' or 'p2p'
     const isGroup = chatType === 'group';
     const msgId: string = message.message_id;
-    const timestamp = new Date(
-      parseInt(message.create_time, 10),
-    ).toISOString();
+    const timestamp = new Date(parseInt(message.create_time, 10)).toISOString();
     const senderId: string = sender?.sender_id?.open_id || '';
     const senderName: string =
       sender?.sender_id?.user_id || senderId || 'Unknown';
@@ -155,7 +154,10 @@ export class FeishuChannel implements Channel {
       if (!isGroup) {
         // P2P → auto-register only if sender is in allowlist (or allowlist is empty = allow all)
         if (this.allowedUsers.size > 0 && !this.allowedUsers.has(senderId)) {
-          logger.debug({ chatJid, senderId }, 'P2P from non-allowlisted user, ignoring');
+          logger.debug(
+            { chatJid, senderId },
+            'P2P from non-allowlisted user, ignoring',
+          );
           return;
         }
         const folder = `feishu_dm_${chatId.slice(-8)}`;
@@ -246,8 +248,7 @@ export class FeishuChannel implements Channel {
   }
 
   private parsePostContent(post: any): string {
-    const lang =
-      post.zh_cn || post.en_us || (Object.values(post)[0] as any);
+    const lang = post.zh_cn || post.en_us || (Object.values(post)[0] as any);
     if (!lang) return '[Rich Text]';
 
     let text = lang.title ? `${lang.title}\n` : '';
@@ -405,12 +406,10 @@ registerChannel('feishu', (opts: ChannelOpts) => {
     'FEISHU_DOMAIN',
     'FEISHU_ALLOWED_USERS',
   ]);
-  const appId =
-    process.env.FEISHU_APP_ID || envVars.FEISHU_APP_ID || '';
+  const appId = process.env.FEISHU_APP_ID || envVars.FEISHU_APP_ID || '';
   const appSecret =
     process.env.FEISHU_APP_SECRET || envVars.FEISHU_APP_SECRET || '';
-  const domain =
-    process.env.FEISHU_DOMAIN || envVars.FEISHU_DOMAIN || 'feishu';
+  const domain = process.env.FEISHU_DOMAIN || envVars.FEISHU_DOMAIN || 'feishu';
   const allowedUsersRaw =
     process.env.FEISHU_ALLOWED_USERS || envVars.FEISHU_ALLOWED_USERS || '';
   const allowedUsers = allowedUsersRaw

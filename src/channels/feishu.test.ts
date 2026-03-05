@@ -64,7 +64,10 @@ vi.mock('@larksuiteoapi/node-sdk', () => {
       }
     },
     AppType: { SelfBuild: 'SelfBuild' },
-    Domain: { Feishu: 'https://open.feishu.cn', Lark: 'https://open.larksuite.com' },
+    Domain: {
+      Feishu: 'https://open.feishu.cn',
+      Lark: 'https://open.larksuite.com',
+    },
     LoggerLevel: { INFO: 'info' },
   };
 });
@@ -459,7 +462,12 @@ describe('FeishuChannel', () => {
 
   describe('content extraction', () => {
     it('extracts text with mention placeholder replacement', async () => {
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', createTestOpts());
+      const channel = new FeishuChannel(
+        'app_id',
+        'app_secret',
+        'feishu',
+        createTestOpts(),
+      );
       const result = channel.extractContent({
         message_type: 'text',
         content: '{"text":"@_user_1 hi @_user_2"}',
@@ -472,7 +480,12 @@ describe('FeishuChannel', () => {
     });
 
     it('returns placeholder for image messages', () => {
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', createTestOpts());
+      const channel = new FeishuChannel(
+        'app_id',
+        'app_secret',
+        'feishu',
+        createTestOpts(),
+      );
       const result = channel.extractContent({
         message_type: 'image',
         content: '{"image_key":"img_v3_xxx"}',
@@ -482,7 +495,12 @@ describe('FeishuChannel', () => {
     });
 
     it('returns file name for file messages', () => {
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', createTestOpts());
+      const channel = new FeishuChannel(
+        'app_id',
+        'app_secret',
+        'feishu',
+        createTestOpts(),
+      );
       const result = channel.extractContent({
         message_type: 'file',
         content: '{"file_key":"file_v3_xxx","file_name":"report.pdf"}',
@@ -492,7 +510,12 @@ describe('FeishuChannel', () => {
     });
 
     it('returns fallback for file without name', () => {
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', createTestOpts());
+      const channel = new FeishuChannel(
+        'app_id',
+        'app_secret',
+        'feishu',
+        createTestOpts(),
+      );
       const result = channel.extractContent({
         message_type: 'file',
         content: '{"file_key":"file_v3_xxx"}',
@@ -502,7 +525,12 @@ describe('FeishuChannel', () => {
     });
 
     it('returns placeholder for audio', () => {
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', createTestOpts());
+      const channel = new FeishuChannel(
+        'app_id',
+        'app_secret',
+        'feishu',
+        createTestOpts(),
+      );
       const result = channel.extractContent({
         message_type: 'audio',
         content: '{"file_key":"file_v3_xxx"}',
@@ -512,7 +540,12 @@ describe('FeishuChannel', () => {
     });
 
     it('returns placeholder for sticker', () => {
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', createTestOpts());
+      const channel = new FeishuChannel(
+        'app_id',
+        'app_secret',
+        'feishu',
+        createTestOpts(),
+      );
       const result = channel.extractContent({
         message_type: 'sticker',
         content: '{"file_key":"file_v3_xxx"}',
@@ -522,7 +555,12 @@ describe('FeishuChannel', () => {
     });
 
     it('returns placeholder for interactive card', () => {
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', createTestOpts());
+      const channel = new FeishuChannel(
+        'app_id',
+        'app_secret',
+        'feishu',
+        createTestOpts(),
+      );
       const result = channel.extractContent({
         message_type: 'interactive',
         content: '{"header":{}}',
@@ -532,7 +570,12 @@ describe('FeishuChannel', () => {
     });
 
     it('returns placeholder for unknown message types', () => {
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', createTestOpts());
+      const channel = new FeishuChannel(
+        'app_id',
+        'app_secret',
+        'feishu',
+        createTestOpts(),
+      );
       const result = channel.extractContent({
         message_type: 'merge_forward',
         content: '{}',
@@ -542,7 +585,12 @@ describe('FeishuChannel', () => {
     });
 
     it('parses rich text (post) messages', () => {
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', createTestOpts());
+      const channel = new FeishuChannel(
+        'app_id',
+        'app_secret',
+        'feishu',
+        createTestOpts(),
+      );
       const postContent = JSON.stringify({
         zh_cn: {
           title: 'Test Title',
@@ -567,7 +615,12 @@ describe('FeishuChannel', () => {
     });
 
     it('handles post with only en_us locale', () => {
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', createTestOpts());
+      const channel = new FeishuChannel(
+        'app_id',
+        'app_secret',
+        'feishu',
+        createTestOpts(),
+      );
       const postContent = JSON.stringify({
         en_us: {
           title: 'English Post',
@@ -583,7 +636,12 @@ describe('FeishuChannel', () => {
     });
 
     it('handles malformed JSON content gracefully', () => {
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', createTestOpts());
+      const channel = new FeishuChannel(
+        'app_id',
+        'app_secret',
+        'feishu',
+        createTestOpts(),
+      );
       const result = channel.extractContent({
         message_type: 'text',
         content: 'not-json',
