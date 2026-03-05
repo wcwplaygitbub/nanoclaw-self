@@ -290,7 +290,10 @@ export class FeishuChannel implements Channel {
         this.typingMessageIds.delete(jid);
         try {
           const card = {
-            elements: [{ tag: 'markdown', content: chunks[0] }],
+            schema: '2.0',
+            body: {
+              elements: [{ tag: 'markdown', content: chunks[0] }],
+            },
           };
           await this.client.im.message.patch({
             path: { message_id: typingMsgId },
@@ -308,7 +311,10 @@ export class FeishuChannel implements Channel {
       // Send remaining chunks (or all chunks if no typing message)
       for (let i = startIndex; i < chunks.length; i++) {
         const card = {
-          elements: [{ tag: 'markdown', content: chunks[i] }],
+          schema: '2.0',
+          body: {
+            elements: [{ tag: 'markdown', content: chunks[i] }],
+          },
         };
         await this.client.im.message.create({
           params: { receive_id_type: 'chat_id' },
@@ -353,7 +359,10 @@ export class FeishuChannel implements Channel {
 
       try {
         const card = {
-          elements: [{ tag: 'markdown', content: '⏳ 思考中...' }],
+          schema: '2.0',
+          body: {
+            elements: [{ tag: 'markdown', content: '⏳ 思考中...' }],
+          },
         };
         const resp = await this.client.im.message.reply({
           path: { message_id: replyToId },
