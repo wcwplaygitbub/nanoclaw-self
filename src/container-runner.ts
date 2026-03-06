@@ -46,6 +46,9 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  // Token-level streaming fields
+  delta?: string;
+  deltaType?: 'text_start' | 'text_delta' | 'text_done';
 }
 
 interface VolumeMount {

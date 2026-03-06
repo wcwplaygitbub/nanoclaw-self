@@ -35,6 +35,9 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  // Token-level streaming fields
+  delta?: string;
+  deltaType?: 'text_start' | 'text_delta' | 'text_done';
 }
 
 interface SessionEntry {
@@ -391,6 +394,10 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
+  // Token-level streaming state
+  let inToolMode = false;
+  let isStreamingText = false;
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
@@ -421,6 +428,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
+      includePartialMessages: true,
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
@@ -458,6 +466,41 @@ async function runQuery(
     messageCount++;
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
+
+    // ── Token-level streaming: forward text deltas, suppress tool deltas ──
+    if (message.type === 'stream_event') {
+      const event = (message as any).event;
+
+      // Tool use block starts → enter silent mode (don't forward tool arg deltas)
+      if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+        inToolMode = true;
+      }
+
+      // Text block starts → send text_start marker
+      if (event.type === 'content_block_start' && event.content_block?.type === 'text' && !inToolMode) {
+        isStreamingText = true;
+        writeOutput({ status: 'success', result: null, delta: '', deltaType: 'text_start' });
+      }
+
+      // Token increment → forward only text deltas (not tool argument deltas)
+      if (event.type === 'content_block_delta'
+          && event.delta?.type === 'text_delta'
+          && !inToolMode
+          && isStreamingText) {
+        writeOutput({ status: 'success', result: null, delta: event.delta.text, deltaType: 'text_delta' });
+      }
+
+      // Block ends
+      if (event.type === 'content_block_stop') {
+        if (isStreamingText && !inToolMode) {
+          writeOutput({ status: 'success', result: null, delta: '', deltaType: 'text_done' });
+          isStreamingText = false;
+        }
+        inToolMode = false;
+      }
+
+      continue;
+    }
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;

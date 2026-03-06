@@ -267,7 +267,7 @@ export class FeishuChannel implements Channel {
 
   // ─── Outbound ───────────────────────────────────────────────────────
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(jid: string, text: string): Promise<string | void> {
     if (!this.client) {
       logger.warn('Feishu client not initialized');
       return;
@@ -286,6 +286,7 @@ export class FeishuChannel implements Channel {
       // If there's a "thinking" placeholder, update the first chunk into it
       const typingMsgId = this.typingMessageIds.get(jid);
       let startIndex = 0;
+      let lastMsgId: string | undefined;
 
       if (typingMsgId && chunks.length > 0) {
         this.typingMessageIds.delete(jid);
@@ -302,6 +303,7 @@ export class FeishuChannel implements Channel {
               content: JSON.stringify(card),
             },
           });
+          lastMsgId = typingMsgId;
           startIndex = 1; // first chunk handled via update
         } catch {
           // Update failed (e.g. message already deleted), fall back to sending new
@@ -317,7 +319,7 @@ export class FeishuChannel implements Channel {
             elements: [{ tag: 'markdown', content: chunks[i] }],
           },
         };
-        await this.client.im.message.create({
+        const resp = await this.client.im.message.create({
           params: { receive_id_type: 'chat_id' },
           data: {
             receive_id: chatId,
@@ -325,9 +327,11 @@ export class FeishuChannel implements Channel {
             msg_type: 'interactive',
           },
         });
+        lastMsgId = resp?.data?.message_id;
       }
 
       logger.info({ jid, length: text.length }, 'Feishu message sent');
+      return lastMsgId;
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Feishu message');
     }
@@ -348,6 +352,26 @@ export class FeishuChannel implements Channel {
     this.wsClient = null;
     this.client = null;
     logger.info('Feishu channel stopped');
+  }
+
+  async editMessage(jid: string, messageId: string, text: string): Promise<void> {
+    if (!this.client) return;
+    try {
+      const card = {
+        schema: '2.0',
+        body: {
+          elements: [{ tag: 'markdown', content: text }],
+        },
+      };
+      await this.client.im.message.patch({
+        path: { message_id: messageId },
+        data: {
+          content: JSON.stringify(card),
+        },
+      });
+    } catch (err) {
+      logger.debug({ jid, messageId, err }, 'Failed to edit Feishu message');
+    }
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {

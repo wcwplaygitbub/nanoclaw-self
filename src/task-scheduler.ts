@@ -31,7 +31,7 @@ export interface SchedulerDependencies {
     containerName: string,
     groupFolder: string,
   ) => void;
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (jid: string, text: string) => Promise<string | void>;
 }
 
 async function runTask(

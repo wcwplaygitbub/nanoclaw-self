@@ -193,8 +193,73 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
+  // ── Streaming output state ──
+  let streamingMsgId: string | null = null;
+  let accumulatedText = '';
+  const supportsEdit = typeof channel.editMessage === 'function';
+  let lastEditTime = 0;
+  const EDIT_INTERVAL_MS = 300;
+  let pendingEditTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const flushEdit = async () => {
+    if (streamingMsgId && accumulatedText && channel.editMessage) {
+      try {
+        await channel.editMessage(chatJid, streamingMsgId, accumulatedText);
+      } catch (err) {
+        logger.debug({ chatJid, err }, 'Failed to flush streaming edit');
+      }
+      lastEditTime = Date.now();
+    }
+  };
+
   const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
+    // ── Handle delta events (streaming output) ──
+    if (result.deltaType && supportsEdit) {
+      if (result.deltaType === 'text_start') {
+        // Only create a new message for the FIRST text block.
+        // Subsequent text blocks (after tool calls) reuse the same message.
+        if (!streamingMsgId) {
+          // Don't call setTyping(false) here — sendMessage will automatically
+          // consume the "thinking" placeholder and patch it in-place.
+          accumulatedText = '';
+          streamingMsgId = (await channel.sendMessage(chatJid, '▍')) || null;
+        }
+        // If we already have a streaming message (from a prior text block),
+        // just keep appending to it. Add a separator for readability.
+        if (accumulatedText) {
+          accumulatedText += '\n\n';
+        }
+      }
+
+      if (result.deltaType === 'text_delta' && result.delta) {
+        accumulatedText += result.delta;
+        const now = Date.now();
+        if (now - lastEditTime >= EDIT_INTERVAL_MS) {
+          if (pendingEditTimer) clearTimeout(pendingEditTimer);
+          await flushEdit();
+        } else if (!pendingEditTimer) {
+          pendingEditTimer = setTimeout(async () => {
+            pendingEditTimer = null;
+            await flushEdit();
+          }, EDIT_INTERVAL_MS - (now - lastEditTime));
+        }
+      }
+
+      if (result.deltaType === 'text_done') {
+        if (pendingEditTimer) { clearTimeout(pendingEditTimer); pendingEditTimer = null; }
+        // Strip incomplete <internal> tags from accumulated text
+        accumulatedText = accumulatedText.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        await flushEdit();
+        // Don't clear streamingMsgId here — a subsequent text block (after tool calls)
+        // should reuse the same message. It will be cleaned up after runAgent completes.
+        outputSentToUser = true;
+      }
+
+      resetIdleTimer();
+      return;
+    }
+
+    // ── Original logic: handle complete result ──
     if (result.result) {
       const raw =
         typeof result.result === 'string'
@@ -204,9 +269,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        // Skip if streaming already delivered this text to the user
+        if (!outputSentToUser) {
+          await channel.sendMessage(chatJid, text);
+        }
         outputSentToUser = true;
       }
+      // Reset streaming state for the next query cycle (container reuse via IPC).
+      // Without this, a subsequent query's deltas would append to the old message.
+      streamingMsgId = null;
+      accumulatedText = '';
+      outputSentToUser = false;
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
     }
