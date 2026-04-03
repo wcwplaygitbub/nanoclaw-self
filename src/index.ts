@@ -303,17 +303,25 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           if (pendingEditTimer) clearTimeout(pendingEditTimer);
           await flushEdit();
         } else if (!pendingEditTimer) {
-          pendingEditTimer = setTimeout(async () => {
-            pendingEditTimer = null;
-            await flushEdit();
-          }, EDIT_INTERVAL_MS - (now - lastEditTime));
+          pendingEditTimer = setTimeout(
+            async () => {
+              pendingEditTimer = null;
+              await flushEdit();
+            },
+            EDIT_INTERVAL_MS - (now - lastEditTime),
+          );
         }
       }
 
       if (result.deltaType === 'text_done') {
-        if (pendingEditTimer) { clearTimeout(pendingEditTimer); pendingEditTimer = null; }
+        if (pendingEditTimer) {
+          clearTimeout(pendingEditTimer);
+          pendingEditTimer = null;
+        }
         // Strip incomplete <internal> tags from accumulated text
-        accumulatedText = accumulatedText.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        accumulatedText = accumulatedText
+          .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+          .trim();
         await flushEdit();
         // Don't clear streamingMsgId here — a subsequent text block (after tool calls)
         // should reuse the same message. It will be cleaned up after runAgent completes.

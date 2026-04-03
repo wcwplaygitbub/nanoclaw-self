@@ -354,7 +354,11 @@ export class FeishuChannel implements Channel {
     logger.info('Feishu channel stopped');
   }
 
-  async editMessage(jid: string, messageId: string, text: string): Promise<void> {
+  async editMessage(
+    jid: string,
+    messageId: string,
+    text: string,
+  ): Promise<void> {
     if (!this.client) return;
     try {
       const card = {
