@@ -27,8 +27,8 @@ vi.mock('../logger.js', () => ({
 // --- Lark SDK mock ---
 
 const mockCreate = vi.fn().mockResolvedValue({});
-const mockBotInfoGet = vi.fn().mockResolvedValue({
-  data: { bot: { open_id: 'ou_bot_123' } },
+const mockRequest = vi.fn().mockResolvedValue({
+  bot: { open_id: 'ou_bot_123' },
 });
 const mockWsStart = vi.fn().mockResolvedValue(undefined);
 
@@ -41,9 +41,7 @@ vi.mock('@larksuiteoapi/node-sdk', () => {
       im = {
         message: { create: mockCreate },
       };
-      bot = {
-        botInfo: { get: mockBotInfoGet },
-      };
+      request = mockRequest;
     },
     WSClient: class MockWSClient {
       async start(opts: any) {
@@ -88,6 +86,7 @@ function createTestOpts(
         folder: 'test-group',
         trigger: '@Andy',
         added_at: '2024-01-01T00:00:00.000Z',
+        isMain: true,
       },
     })),
     registerGroup: vi.fn(),
@@ -165,7 +164,7 @@ describe('FeishuChannel', () => {
 
       await channel.connect();
 
-      expect(mockBotInfoGet).toHaveBeenCalled();
+      expect(mockRequest).toHaveBeenCalled();
     });
 
     it('starts WebSocket client on connect', async () => {
@@ -665,8 +664,11 @@ describe('FeishuChannel', () => {
         params: { receive_id_type: 'chat_id' },
         data: {
           receive_id: 'oc_test123',
-          content: JSON.stringify({ text: 'Hello' }),
-          msg_type: 'text',
+          content: JSON.stringify({
+            schema: '2.0',
+            body: { elements: [{ tag: 'markdown', content: 'Hello' }] },
+          }),
+          msg_type: 'interactive',
         },
       });
     });
@@ -701,7 +703,13 @@ describe('FeishuChannel', () => {
         1,
         expect.objectContaining({
           data: expect.objectContaining({
-            content: JSON.stringify({ text: 'x'.repeat(4000) }),
+            content: JSON.stringify({
+              schema: '2.0',
+              body: {
+                elements: [{ tag: 'markdown', content: 'x'.repeat(4000) }],
+              },
+            }),
+            msg_type: 'interactive',
           }),
         }),
       );
@@ -710,7 +718,13 @@ describe('FeishuChannel', () => {
         2,
         expect.objectContaining({
           data: expect.objectContaining({
-            content: JSON.stringify({ text: 'x'.repeat(1000) }),
+            content: JSON.stringify({
+              schema: '2.0',
+              body: {
+                elements: [{ tag: 'markdown', content: 'x'.repeat(1000) }],
+              },
+            }),
+            msg_type: 'interactive',
           }),
         }),
       );

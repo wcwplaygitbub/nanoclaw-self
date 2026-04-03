@@ -9,7 +9,46 @@ Run setup steps automatically. Only pause when user action is required (channel 
 
 **Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. authenticating a channel, pasting a secret token). If a dependency is missing, install it. If a service won't start, diagnose and repair. Ask the user for permission when needed, then do the work.
 
-**UX Note:** Use `AskUserQuestion` for all user-facing questions.
+**UX Note:** Use `AskUserQuestion` for multiple-choice questions only (e.g. "Docker or Apple Container?", "which channels?"). Do NOT use it when free-text input is needed (e.g. phone numbers, tokens, paths) — just ask the question in plain text and wait for the user's reply.
+
+## 0. Git & Fork Setup
+
+Check the git remote configuration to ensure the user has a fork and upstream is configured.
+
+Run:
+- `git remote -v`
+
+**Case A — `origin` points to `qwibitai/nanoclaw` (user cloned directly):**
+
+The user cloned instead of forking. AskUserQuestion: "You cloned NanoClaw directly. We recommend forking so you can push your customizations. Would you like to set up a fork?"
+- Fork now (recommended) — walk them through it
+- Continue without fork — they'll only have local changes
+
+If fork: instruct the user to fork `qwibitai/nanoclaw` on GitHub (they need to do this in their browser), then ask them for their GitHub username. Run:
+```bash
+git remote rename origin upstream
+git remote add origin https://github.com/<their-username>/nanoclaw.git
+git push --force origin main
+```
+Verify with `git remote -v`.
+
+If continue without fork: add upstream so they can still pull updates:
+```bash
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
+```
+
+**Case B — `origin` points to user's fork, no `upstream` remote:**
+
+Add upstream:
+```bash
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
+```
+
+**Case C — both `origin` (user's fork) and `upstream` (qwibitai) exist:**
+
+Already configured. Continue.
+
+**Verify:** `git remote -v` should show `origin` → user's repo, `upstream` → `qwibitai/nanoclaw.git`.
 
 ## 1. Bootstrap (Node.js + Dependencies)
 
@@ -19,7 +58,7 @@ Run `bash setup.sh` and parse the status block.
   - macOS: `brew install node@22` (if brew available) or install nvm then `nvm install 22`
   - Linux: `curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs`, or nvm
   - After installing Node, re-run `bash setup.sh`
-- If DEPS_OK=false → Read `logs/setup.log`. Try: delete `node_modules` and `package-lock.json`, re-run `bash setup.sh`. If native module build fails, install build tools (`xcode-select --install` on macOS, `build-essential` on Linux), then retry.
+- If DEPS_OK=false → Read `logs/setup.log`. Try: delete `node_modules`, re-run `bash setup.sh`. If native module build fails, install build tools (`xcode-select --install` on macOS, `build-essential` on Linux), then retry.
 - If NATIVE_OK=false → better-sqlite3 failed to load. Install build tools and re-run.
 - Record PLATFORM and IS_WSL for later steps.
 
@@ -31,6 +70,13 @@ Run `npx tsx setup/index.ts --step environment` and parse the status block.
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
 - Record APPLE_CONTAINER and DOCKER values for step 3
 
+## 2a. Timezone
+
+Run `npx tsx setup/index.ts --step timezone` and parse the status block.
+
+- If NEEDS_USER_INPUT=true → The system timezone could not be autodetected (e.g. POSIX-style TZ like `IST-2`). AskUserQuestion: "What is your timezone?" with common options (America/New_York, Europe/London, Asia/Jerusalem, Asia/Tokyo) and an "Other" escape. Then re-run: `npx tsx setup/index.ts --step timezone -- --tz <their-answer>`.
+- If STATUS=success → Timezone is configured. Note RESOLVED_TZ for reference.
+
 ## 3. Container Runtime
 
 ### 3a. Choose runtime
@@ -38,7 +84,10 @@ Run `npx tsx setup/index.ts --step environment` and parse the status block.
 Check the preflight results for `APPLE_CONTAINER` and `DOCKER`, and the PLATFORM from step 1.
 
 - PLATFORM=linux → Docker (only option)
-- PLATFORM=macos + APPLE_CONTAINER=installed → Use `AskUserQuestion: Docker (cross-platform) or Apple Container (native macOS)?` If Apple Container, run `/convert-to-apple-container` now, then skip to 3c.
+- PLATFORM=macos + APPLE_CONTAINER=installed → AskUserQuestion with two options:
+  1. **Docker (recommended)** — description: "Cross-platform, better credential management, well-tested."
+  2. **Apple Container (experimental)** — description: "Native macOS runtime. Requires advanced setup."
+  If Apple Container, run `/convert-to-apple-container` now, then skip to 3c.
 - PLATFORM=macos + APPLE_CONTAINER=not_found → Docker
 
 ### 3a-docker. Install Docker
@@ -73,15 +122,106 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 **If TEST_OK=false but BUILD_OK=true:** The image built but won't run. Check logs — common cause is runtime not fully started. Wait a moment and retry the test.
 
-## 4. Claude Authentication (No Script)
+## 4. Credential System
 
-If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. If present, confirm with user: keep or reconfigure?
+The credential system depends on the container runtime chosen in step 3.
 
-AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
+### 4a. Docker → OneCLI
 
-**Subscription:** Tell user to run `claude setup-token` in another terminal, copy the token, add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to `.env`. Do NOT collect the token in chat.
+Install OneCLI and its CLI tool:
 
-**API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
+```bash
+curl -fsSL onecli.sh/install | sh
+curl -fsSL onecli.sh/cli/install | sh
+```
+
+Verify both installed: `onecli version`. If the command is not found, the CLI was likely installed to `~/.local/bin/`. Add it to PATH for the current session and persist it:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+# Persist for future sessions (append to shell profile if not already present)
+grep -q '.local/bin' ~/.bashrc 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+grep -q '.local/bin' ~/.zshrc 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
+Then re-verify with `onecli version`.
+
+Point the CLI at the local OneCLI instance (it defaults to the cloud service otherwise):
+```bash
+onecli config set api-host http://127.0.0.1:10254
+```
+
+Ensure `.env` has the OneCLI URL (create the file if it doesn't exist):
+```bash
+grep -q 'ONECLI_URL' .env 2>/dev/null || echo 'ONECLI_URL=http://127.0.0.1:10254' >> .env
+```
+
+Check if a secret already exists:
+```bash
+onecli secrets list
+```
+
+If an Anthropic secret is listed, confirm with user: keep or reconfigure? If keeping, skip to step 5.
+
+AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
+
+1. **Claude subscription (Pro/Max)** — description: "Uses your existing Claude Pro or Max subscription. You'll run `claude setup-token` in another terminal to get your token."
+2. **Anthropic API key** — description: "Pay-per-use API key from console.anthropic.com."
+
+#### Subscription path
+
+Tell the user:
+
+> Run `claude setup-token` in another terminal. It will output a token — copy it but don't paste it here.
+
+Then stop and wait for the user to confirm they have the token. Do NOT proceed until they respond.
+
+Once they confirm, they register it with OneCLI. AskUserQuestion with two options:
+
+1. **Dashboard** — description: "Best if you have a browser on this machine. Open http://127.0.0.1:10254 and add the secret in the UI. Use type 'anthropic' and paste your token as the value."
+2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_TOKEN --host-pattern api.anthropic.com`"
+
+#### API key path
+
+Tell the user to get an API key from https://console.anthropic.com/settings/keys if they don't have one.
+
+Then AskUserQuestion with two options:
+
+1. **Dashboard** — description: "Best if you have a browser on this machine. Open http://127.0.0.1:10254 and add the secret in the UI."
+2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_KEY --host-pattern api.anthropic.com`"
+
+#### After either path
+
+Ask them to let you know when done.
+
+**If the user's response happens to contain a token or key** (starts with `sk-ant-`): handle it gracefully — run the `onecli secrets create` command with that value on their behalf.
+
+**After user confirms:** verify with `onecli secrets list` that an Anthropic secret exists. If not, ask again.
+
+### 4b. Apple Container → Native Credential Proxy
+
+Apple Container is not compatible with OneCLI. The credential proxy code is already included in the apple-container branch — do NOT invoke `/use-native-credential-proxy` (it would conflict with already-applied code).
+
+Instead, just configure the credentials in `.env`:
+
+AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
+
+1. **Claude subscription (Pro/Max)** — description: "Uses your existing Claude Pro or Max subscription. Run `claude setup-token` in another terminal to get your token."
+2. **Anthropic API key** — description: "Pay-per-use API key from console.anthropic.com."
+
+For subscription: tell the user to run `claude setup-token` in another terminal. Stop and wait for the user to confirm they have completed this step successfully before proceeding.
+
+Once confirmed, add the token to `.env`:
+```bash
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<their-token>' >> .env
+```
+
+For API key: add to `.env`:
+```bash
+echo 'ANTHROPIC_API_KEY=<their-key>' >> .env
+```
+
+Verify the proxy starts: `npm run dev` should show "Credential proxy listening" in the logs.
 
 ## 5. Set Up Channels
 
@@ -101,13 +241,19 @@ For each selected channel, invoke its skill:
 - **Discord:** Invoke `/add-discord`
 
 Each skill will:
-1. Install the channel code (via `apply-skill`)
+1. Install the channel code (via `git merge` of the skill branch)
 2. Collect credentials/tokens and write to `.env`
 3. Authenticate (WhatsApp QR/pairing, or verify token-based connection)
 4. Register the chat with the correct JID format
 5. Build and verify
 
-**After all channel skills complete**, continue to step 6.
+**After all channel skills complete**, install dependencies and rebuild — channel merges may introduce new packages:
+
+```bash
+npm install && npm run build
+```
+
+If the build fails, read the error output and fix it (usually a missing dependency). Then continue to step 6.
 
 ## 6. Mount Allowlist
 
@@ -153,7 +299,7 @@ Run `npx tsx setup/index.ts --step verify` and parse the status block.
 **If STATUS=failed, fix each:**
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
 - SERVICE=not_found → re-run step 7
-- CREDENTIALS=missing → re-run step 4
+- CREDENTIALS=missing → re-run step 4 (Docker: check `onecli secrets list`; Apple Container: check `.env` for credentials)
 - CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
 - REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
@@ -162,7 +308,7 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), missing `.env` (step 4), missing channel credentials (re-invoke channel skill).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), credential system not running (Docker: check `curl http://127.0.0.1:10254/api/health`; Apple Container: check `.env` credentials), missing channel credentials (re-invoke channel skill).
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
 
@@ -171,3 +317,9 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 **Channel not connecting:** Verify the channel's credentials are set in `.env`. Channels auto-enable when their credentials are present. For WhatsApp: check `store/auth/creds.json` exists. For token-based channels: check token values in `.env`. Restart the service after any `.env` change.
 
 **Unload service:** macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist` | Linux: `systemctl --user stop nanoclaw`
+
+
+## 9. Diagnostics
+
+1. Use the Read tool to read `.claude/skills/setup/diagnostics.md`.
+2. Follow every step in that file before completing setup.
