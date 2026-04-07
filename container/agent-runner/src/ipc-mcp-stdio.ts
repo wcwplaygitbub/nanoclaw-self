@@ -15,10 +15,30 @@ const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 
-// Context from environment variables (set by the agent runner)
-const chatJid = process.env.NANOCLAW_CHAT_JID!;
-const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
-const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+// Context from environment variables (set by the agent runner).
+// Fallback: read from config file written by agent-runner before spawning SDK,
+// because some SDK versions do not inherit env into MCP server subprocesses.
+const CONFIG_PATH = '/workspace/ipc/mcp-context.json';
+
+function loadContext(): { chatJid: string; groupFolder: string; isMain: boolean } {
+  let chatJid = process.env.NANOCLAW_CHAT_JID || '';
+  let groupFolder = process.env.NANOCLAW_GROUP_FOLDER || '';
+  let isMain = process.env.NANOCLAW_IS_MAIN === '1';
+
+  if (!chatJid || !groupFolder) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+      chatJid = chatJid || cfg.chatJid || '';
+      groupFolder = groupFolder || cfg.groupFolder || '';
+      isMain = isMain || cfg.isMain === true;
+    } catch {
+      // Config file may not exist yet
+    }
+  }
+  return { chatJid, groupFolder, isMain };
+}
+
+const { chatJid, groupFolder, isMain } = loadContext();
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -64,6 +84,56 @@ server.tool(
     writeIpcFile(MESSAGES_DIR, data);
 
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+  },
+);
+
+server.tool(
+  'send_file',
+  'Send a file to the user or group. The file must exist under /workspace/group/. Provide the path relative to /workspace/group/ (e.g. "reports/output.csv").',
+  {
+    relative_path: z
+      .string()
+      .describe(
+        'Path to the file relative to /workspace/group/ (e.g. "reports/output.csv")',
+      ),
+    file_name: z
+      .string()
+      .optional()
+      .describe(
+        'Display name for the file (e.g. "output.csv"). Defaults to the basename of relative_path.',
+      ),
+  },
+  async (args) => {
+    const fullPath = path.join('/workspace/group', args.relative_path);
+    if (!fs.existsSync(fullPath)) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `File not found: ${args.relative_path}. The file must exist under /workspace/group/.`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const fileName =
+      args.file_name || path.basename(args.relative_path);
+
+    const data = {
+      type: 'file',
+      chatJid,
+      relativePath: args.relative_path,
+      fileName,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `File "${fileName}" sent.` }],
+    };
   },
 );
 

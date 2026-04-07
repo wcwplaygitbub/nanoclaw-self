@@ -98,6 +98,12 @@ export interface Channel {
   // Optional: edit an already-sent message (enables streaming output).
   // Channels that don't implement this fall back to non-streaming mode.
   editMessage?(jid: string, messageId: string, text: string): Promise<void>;
+  // Optional: send a file to the user/group.
+  sendFile?(
+    jid: string,
+    filePath: string,
+    fileName: string,
+  ): Promise<string | void>;
 }
 
 // Callback type that channels use to deliver inbound messages

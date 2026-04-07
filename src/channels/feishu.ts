@@ -1,7 +1,10 @@
+import fs from 'fs';
 import * as lark from '@larksuiteoapi/node-sdk';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
+import { processImage } from '../image.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Channel } from '../types.js';
@@ -98,7 +101,7 @@ export class FeishuChannel implements Channel {
 
   // ─── Inbound message handling ───────────────────────────────────────
 
-  private handleMessage(data: any): void {
+  private async handleMessage(data: any): Promise<void> {
     const message = data.message;
     const sender = data.sender;
 
@@ -127,6 +130,7 @@ export class FeishuChannel implements Channel {
 
     // Parse content based on message type
     const content = this.extractContent(message);
+    logger.info({ messageType: message.message_type, content: message.content, extractedContent: content }, 'Feishu message received (debug)');
 
     // Translate @bot mention → TRIGGER_PATTERN so the orchestrator picks it up
     let finalContent = content;
@@ -189,6 +193,35 @@ export class FeishuChannel implements Channel {
       }
     }
 
+    // Download and process any images in the message (image type or post with img tags)
+    const imageKeys = this.extractImageKeys(message);
+    if (imageKeys.length > 0) {
+      logger.info({ groupFolder: group.folder, imageKeys }, 'Image(s) detected, downloading...');
+      const processedImages: string[] = [];
+      for (const imageKey of imageKeys) {
+        const processed = await this.downloadAndProcessImage(
+          imageKey,
+          message.message_id,
+          group.folder,
+        );
+        if (processed) {
+          processedImages.push(processed.content);
+        }
+      }
+      if (processedImages.length > 0) {
+        // Replace [Image] placeholders in content with actual image references
+        // For pure image messages, replace the whole content
+        if (message.message_type === 'image') {
+          finalContent = processedImages[0];
+        } else {
+          // For post messages, append image references
+          const imageRefs = processedImages.join(' ');
+          finalContent = finalContent.replace(/\[Image\]/g, '').trim();
+          finalContent = finalContent ? `${finalContent}\n${imageRefs}` : imageRefs;
+        }
+      }
+    }
+
     // Track last inbound message ID for reply-style typing indicator
     this.lastInboundMessageId.set(chatJid, msgId);
 
@@ -248,7 +281,7 @@ export class FeishuChannel implements Channel {
   }
 
   private parsePostContent(post: any): string {
-    const lang = post.zh_cn || post.en_us || (Object.values(post)[0] as any);
+    const lang = this.resolvePostLang(post);
     if (!lang) return '[Rich Text]';
 
     let text = lang.title ? `${lang.title}\n` : '';
@@ -263,6 +296,88 @@ export class FeishuChannel implements Channel {
       text += '\n';
     }
     return text.trim();
+  }
+
+  /**
+   * Resolve the language-specific post content.
+   * Feishu posts can be { zh_cn: { title, content } } or flat { title, content }.
+   */
+  private resolvePostLang(post: any): any {
+    if (post.zh_cn) return post.zh_cn;
+    if (post.en_us) return post.en_us;
+    // Flat format: { title, content: [[...]] }
+    if (Array.isArray(post.content)) return post;
+    // Fallback: first value that has a content array
+    for (const val of Object.values(post)) {
+      if (val && typeof val === 'object' && Array.isArray((val as any).content)) {
+        return val;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Extract all image_key values from a message, regardless of type.
+   */
+  private extractImageKeys(message: any): string[] {
+    const keys: string[] = [];
+    let parsed: any;
+    try {
+      parsed = JSON.parse(message.content);
+    } catch {
+      return keys;
+    }
+
+    if (message.message_type === 'image' && parsed.image_key) {
+      keys.push(parsed.image_key);
+    } else if (message.message_type === 'post') {
+      // Scan all content elements in rich text for img tags
+      const lang = this.resolvePostLang(parsed);
+      if (lang?.content) {
+        for (const paragraph of lang.content) {
+          for (const el of paragraph) {
+            if (el.tag === 'img' && el.image_key) {
+              keys.push(el.image_key);
+            }
+          }
+        }
+      }
+    }
+    return keys;
+  }
+
+  private async downloadAndProcessImage(
+    imageKey: string,
+    messageId: string,
+    groupFolder: string,
+  ): Promise<{ content: string; relativePath: string } | null> {
+    if (!this.client) return null;
+    try {
+      logger.info({ imageKey, messageId }, 'Downloading Feishu image');
+
+      // Use messageResource.get which works for images in received messages
+      const resp = await this.client.im.messageResource.get({
+        path: { message_id: messageId, file_key: imageKey },
+        params: { type: 'image' },
+      });
+
+      // SDK returns { writeFile, getReadableStream, headers }
+      const stream = (resp as any).getReadableStream() as import('stream').Readable;
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const buffer = Buffer.concat(chunks);
+      logger.info({ imageKey, bytes: buffer.length }, 'Feishu image downloaded');
+
+      if (buffer.length === 0) return null;
+
+      const groupDir = resolveGroupFolderPath(groupFolder);
+      return processImage(buffer, groupDir, '');
+    } catch (err) {
+      logger.error({ err }, 'Failed to download Feishu image');
+      return null;
+    }
   }
 
   // ─── Outbound ───────────────────────────────────────────────────────
@@ -375,6 +490,53 @@ export class FeishuChannel implements Channel {
       });
     } catch (err) {
       logger.debug({ jid, messageId, err }, 'Failed to edit Feishu message');
+    }
+  }
+
+  async sendFile(
+    jid: string,
+    filePath: string,
+    fileName: string,
+  ): Promise<string | void> {
+    if (!this.client) {
+      logger.warn('Feishu client not initialized');
+      return;
+    }
+
+    const chatId = jid.replace(/^feishu:/, '');
+
+    try {
+      // Upload file to Feishu
+      const uploadResp = await this.client.im.file.create({
+        data: {
+          file_type: 'stream',
+          file_name: fileName,
+          file: fs.createReadStream(filePath),
+        },
+      });
+
+      const fileKey = (uploadResp as any)?.data?.file_key
+        || (uploadResp as any)?.file_key;
+      if (!fileKey) {
+        logger.error({ jid, filePath }, 'Failed to upload file to Feishu: no file_key');
+        return;
+      }
+
+      // Send file message
+      const resp = await this.client.im.message.create({
+        params: { receive_id_type: 'chat_id' },
+        data: {
+          receive_id: chatId,
+          content: JSON.stringify({ file_key: fileKey }),
+          msg_type: 'file',
+        },
+      });
+
+      const msgId = resp?.data?.message_id;
+      logger.info({ jid, fileName, fileKey }, 'Feishu file sent');
+      return msgId;
+    } catch (err) {
+      logger.error({ jid, filePath, fileName, err }, 'Failed to send file via Feishu');
     }
   }
 

@@ -33,6 +33,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  imageAttachments?: Array<{ relativePath: string; mediaType: string }>;
 }
 
 interface ContainerOutput {
@@ -58,9 +59,19 @@ interface SessionsIndex {
 
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | ContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
+}
+
+interface ContentBlock {
+  type: 'text' | 'image';
+  text?: string;
+  source?: {
+    type: 'base64';
+    media_type: string;
+    data: string;
+  };
 }
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
@@ -76,10 +87,10 @@ class MessageStream {
   private waiting: (() => void) | null = null;
   private done = false;
 
-  push(text: string): void {
+  push(content: string | ContentBlock[]): void {
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -368,6 +379,61 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+const IMAGE_REF_PATTERN = /\[Image: (attachments\/[^\]]+)\]/g;
+
+/**
+ * Build multimodal content blocks from a text prompt.
+ * Scans for [Image: attachments/xxx.jpg] references in the text,
+ * loads them as base64, and returns ContentBlock[] for the Claude API.
+ * Also accepts explicit imageAttachments for the initial prompt.
+ */
+function buildPromptContent(
+  text: string,
+  imageAttachments?: Array<{ relativePath: string; mediaType: string }>,
+): string | ContentBlock[] {
+  // Collect image paths from both explicit attachments and text references
+  const imagePaths = new Map<string, string>(); // relativePath -> mediaType
+
+  if (imageAttachments) {
+    for (const att of imageAttachments) {
+      imagePaths.set(att.relativePath, att.mediaType);
+    }
+  }
+
+  // Scan text for inline [Image: attachments/xxx.jpg] references
+  let match: RegExpExecArray | null;
+  IMAGE_REF_PATTERN.lastIndex = 0;
+  while ((match = IMAGE_REF_PATTERN.exec(text)) !== null) {
+    if (!imagePaths.has(match[1])) {
+      imagePaths.set(match[1], 'image/jpeg');
+    }
+  }
+
+  if (imagePaths.size === 0) return text;
+
+  const blocks: ContentBlock[] = [{ type: 'text', text }];
+
+  for (const [relPath, mediaType] of imagePaths) {
+    const imgPath = path.join('/workspace/group', relPath);
+    if (!fs.existsSync(imgPath)) {
+      log(`Image attachment not found: ${imgPath}`);
+      continue;
+    }
+    const data = fs.readFileSync(imgPath).toString('base64');
+    blocks.push({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: mediaType,
+        data,
+      },
+    });
+    log(`Loaded image: ${relPath} (${data.length} base64 chars)`);
+  }
+
+  return blocks.length === 1 ? text : blocks;
+}
+
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -387,7 +453,7 @@ async function runQuery(
   closedDuringQuery: boolean;
 }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+  stream.push(buildPromptContent(prompt, containerInput.imageAttachments));
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -404,7 +470,7 @@ async function runQuery(
     const messages = drainIpcInput();
     for (const text of messages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+      stream.push(buildPromptContent(text));
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -673,6 +739,17 @@ async function main(): Promise<void> {
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+
+  // Write MCP context file so ipc-mcp-stdio.ts can read it as a fallback
+  // when SDK does not propagate env vars to MCP server subprocesses.
+  fs.writeFileSync(
+    '/workspace/ipc/mcp-context.json',
+    JSON.stringify({
+      chatJid: containerInput.chatJid,
+      groupFolder: containerInput.groupFolder,
+      isMain: containerInput.isMain,
+    }),
+  );
 
   // Clean up stale _close sentinel from previous container runs
   try {
