@@ -241,11 +241,7 @@ describe('Feishu ChannelAdapter', () => {
       const event = createMessageEvent({});
       await fireMessageEvent(event);
 
-      expect(testSetup.onMetadata).toHaveBeenCalledWith(
-        'oc_test123',
-        undefined,
-        true,
-      );
+      expect(testSetup.onMetadata).toHaveBeenCalledWith('oc_test123', undefined, true);
     });
 
     it('skips bot (app) messages', async () => {
@@ -310,11 +306,7 @@ describe('Feishu ChannelAdapter', () => {
       });
       await fireMessageEvent(event);
 
-      expect(testSetup.onMetadata).toHaveBeenCalledWith(
-        'oc_dm456',
-        undefined,
-        false,
-      );
+      expect(testSetup.onMetadata).toHaveBeenCalledWith('oc_dm456', undefined, false);
     });
   });
 

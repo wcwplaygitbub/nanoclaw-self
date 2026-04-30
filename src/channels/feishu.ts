@@ -17,18 +17,11 @@ import { registerChannelAdapter } from './channel-registry.js';
 // ─── Adapter factory ──────────────────────────────────────────────────────
 
 function createAdapter(): ChannelAdapter | null {
-  const envVars = readEnvFile([
-    'FEISHU_APP_ID',
-    'FEISHU_APP_SECRET',
-    'FEISHU_DOMAIN',
-    'FEISHU_ALLOWED_USERS',
-  ]);
+  const envVars = readEnvFile(['FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'FEISHU_DOMAIN', 'FEISHU_ALLOWED_USERS']);
   const appId = process.env.FEISHU_APP_ID || envVars.FEISHU_APP_ID || '';
-  const appSecret =
-    process.env.FEISHU_APP_SECRET || envVars.FEISHU_APP_SECRET || '';
+  const appSecret = process.env.FEISHU_APP_SECRET || envVars.FEISHU_APP_SECRET || '';
   const domain = process.env.FEISHU_DOMAIN || envVars.FEISHU_DOMAIN || 'feishu';
-  const allowedUsersRaw =
-    process.env.FEISHU_ALLOWED_USERS || envVars.FEISHU_ALLOWED_USERS || '';
+  const allowedUsersRaw = process.env.FEISHU_ALLOWED_USERS || envVars.FEISHU_ALLOWED_USERS || '';
   const allowedUsers = new Set(
     allowedUsersRaw
       .split(',')
@@ -65,8 +58,7 @@ function createAdapter(): ChannelAdapter | null {
     if (sender?.sender_type === 'app') return;
 
     // Deduplicate retries (Feishu retries if handler takes > 3s)
-    const eventId =
-      data.event_id || data.header?.event_id || message?.message_id;
+    const eventId = data.event_id || data.header?.event_id || message?.message_id;
     if (eventId) {
       if (processedEvents.has(eventId)) return;
       processedEvents.add(eventId);
@@ -81,20 +73,21 @@ function createAdapter(): ChannelAdapter | null {
     const msgId: string = message.message_id;
     const timestamp = new Date(parseInt(message.create_time, 10)).toISOString();
     const senderId: string = sender?.sender_id?.open_id || '';
-    const senderName: string =
-      sender?.sender_id?.user_id || senderId || 'Unknown';
+    const senderName: string = sender?.sender_id?.user_id || senderId || 'Unknown';
 
     // Parse content based on message type
     const content = extractContent(message);
-    log.info('Feishu message received (debug)', { messageType: message.message_type, content: message.content, extractedContent: content });
+    log.info('Feishu message received (debug)', {
+      messageType: message.message_type,
+      content: message.content,
+      extractedContent: content,
+    });
 
     // Translate @bot mention → isMention flag
     let isMention: boolean | undefined;
     if (isGroup) {
       const mentions: any[] = message.mentions || [];
-      isMention = mentions.some(
-        (m) => m.id?.open_id === botOpenId,
-      );
+      isMention = mentions.some((m) => m.id?.open_id === botOpenId);
     }
 
     // Report chat metadata for discovery
@@ -264,9 +257,7 @@ function createAdapter(): ChannelAdapter | null {
       connected = true;
       log.info('Feishu WebSocket connection established');
       console.log('\n  Feishu bot connected (WebSocket mode)');
-      console.log(
-        '  Add the bot to a group and send a message to get the chat ID\n',
-      );
+      console.log('  Add the bot to a group and send a message to get the chat ID\n');
     },
 
     async teardown(): Promise<void> {
@@ -281,11 +272,7 @@ function createAdapter(): ChannelAdapter | null {
       return connected;
     },
 
-    async deliver(
-      platformId: string,
-      _threadId: string | null,
-      message: OutboundMessage,
-    ): Promise<string | undefined> {
+    async deliver(platformId: string, _threadId: string | null, message: OutboundMessage): Promise<string | undefined> {
       if (!client) {
         log.warn('Feishu client not initialized');
         return undefined;
@@ -359,15 +346,11 @@ function createAdapter(): ChannelAdapter | null {
                 data: {
                   file_type: 'stream',
                   file_name: file.filename,
-                  file: fs.createReadStream(
-                    pathFromBuffer(file.filename, file.data),
-                  ),
+                  file: fs.createReadStream(pathFromBuffer(file.filename, file.data)),
                 },
               });
 
-              const fileKey =
-                (uploadResp as any)?.data?.file_key ||
-                (uploadResp as any)?.file_key;
+              const fileKey = (uploadResp as any)?.data?.file_key || (uploadResp as any)?.file_key;
               if (fileKey) {
                 const resp = await client.im.message.create({
                   params: { receive_id_type: 'chat_id' },
@@ -394,10 +377,7 @@ function createAdapter(): ChannelAdapter | null {
       }
     },
 
-    async setTyping(
-      platformId: string,
-      _threadId: string | null,
-    ): Promise<void> {
+    async setTyping(platformId: string, _threadId: string | null): Promise<void> {
       if (!client) return;
 
       const card = {
@@ -456,7 +436,11 @@ function pathFromBuffer(filename: string, data: Buffer): string {
   fs.writeFileSync(tmpPath, data);
   // Schedule cleanup after upload should be done
   setTimeout(() => {
-    try { fs.unlinkSync(tmpPath); } catch { /* best-effort */ }
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {
+      /* best-effort */
+    }
   }, 30_000);
   return tmpPath;
 }
