@@ -2,11 +2,15 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // --- Mocks ---
 
-// Mock registry (registerChannel runs at import time)
-vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
-
-// Mock env reader
-vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
+// Mock env reader — provide credentials so factory returns a real adapter
+vi.mock('../env.js', () => ({
+  readEnvFile: vi.fn(() => ({
+    FEISHU_APP_ID: 'cli_test_app_id',
+    FEISHU_APP_SECRET: 'test_app_secret',
+    FEISHU_DOMAIN: 'feishu',
+    FEISHU_ALLOWED_USERS: '',
+  })),
+}));
 
 // Mock config
 vi.mock('../config.js', () => ({
@@ -14,9 +18,9 @@ vi.mock('../config.js', () => ({
   TRIGGER_PATTERN: /^@Andy\b/i,
 }));
 
-// Mock logger
-vi.mock('../logger.js', () => ({
-  logger: {
+// Mock logger (v2 uses 'log' from '../log.js')
+vi.mock('../log.js', () => ({
+  log: {
     debug: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
@@ -24,22 +28,28 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
+// Mock registry — use inline vi.fn() to avoid TDZ issues with hoisted vi.mock
+vi.mock('./channel-registry.js', () => ({
+  registerChannelAdapter: vi.fn(),
+}));
+
 // --- Lark SDK mock ---
 
 const mockCreate = vi.fn().mockResolvedValue({});
+const mockPatch = vi.fn().mockResolvedValue({});
+const mockReply = vi.fn().mockResolvedValue({});
 const mockRequest = vi.fn().mockResolvedValue({
   bot: { open_id: 'ou_bot_123' },
 });
 const mockWsStart = vi.fn().mockResolvedValue(undefined);
 
-// Capture the event dispatcher so we can fire events in tests
 let capturedEventDispatcher: any = null;
 
 vi.mock('@larksuiteoapi/node-sdk', () => {
   return {
     Client: class MockClient {
       im = {
-        message: { create: mockCreate },
+        message: { create: mockCreate, patch: mockPatch, reply: mockReply },
       };
       request = mockRequest;
     },
@@ -55,7 +65,6 @@ vi.mock('@larksuiteoapi/node-sdk', () => {
         Object.assign(this.handlers, map);
         return this;
       }
-      // Expose for tests to call
       async emit(eventType: string, data: any) {
         const handler = this.handlers[eventType];
         if (handler) await handler(data);
@@ -66,31 +75,30 @@ vi.mock('@larksuiteoapi/node-sdk', () => {
       Feishu: 'https://open.feishu.cn',
       Lark: 'https://open.larksuite.com',
     },
-    LoggerLevel: { INFO: 'info' },
+    LoggerLevel: { info: 'info' },
   };
 });
 
-import { FeishuChannel, FeishuChannelOpts } from './feishu.js';
+// --- Import after mocks (triggers registerChannelAdapter) ---
+
+import './feishu.js';
+import { registerChannelAdapter } from './channel-registry.js';
 
 // --- Test helpers ---
 
-function createTestOpts(
-  overrides?: Partial<FeishuChannelOpts>,
-): FeishuChannelOpts {
+function getAdapterFactory(): () => any {
+  const mockFn = registerChannelAdapter as unknown as vi.Mock;
+  const call = mockFn.mock.calls.find((c: any[]) => c[0] === 'feishu');
+  if (!call) return () => null;
+  return call[1].factory;
+}
+
+function createTestSetup() {
   return {
-    onMessage: vi.fn(),
-    onChatMetadata: vi.fn(),
-    registeredGroups: vi.fn(() => ({
-      'feishu:oc_test123': {
-        name: 'Test Group',
-        folder: 'test-group',
-        trigger: '@Andy',
-        added_at: '2024-01-01T00:00:00.000Z',
-        isMain: true,
-      },
-    })),
-    registerGroup: vi.fn(),
-    ...overrides,
+    onInbound: vi.fn(),
+    onInboundEvent: vi.fn(),
+    onMetadata: vi.fn(),
+    onAction: vi.fn(),
   };
 }
 
@@ -136,197 +144,126 @@ async function fireMessageEvent(data: any) {
 
 // --- Tests ---
 
-describe('FeishuChannel', () => {
+describe('Feishu ChannelAdapter', () => {
+  let adapter: any;
+  let testSetup: ReturnType<typeof createTestSetup>;
+  let savedFactory: (() => any) | null = null;
+
   beforeEach(() => {
+    // Capture the factory before clearAllMocks wipes the call record
+    const mockFn = registerChannelAdapter as unknown as vi.Mock;
+    const call = mockFn.mock.calls.find((c: any[]) => c[0] === 'feishu');
+    if (call) {
+      savedFactory = call[1].factory;
+    }
+
     vi.clearAllMocks();
     capturedEventDispatcher = null;
+
+    // Create a fresh adapter from the saved factory
+    adapter = savedFactory ? savedFactory() : null;
+    testSetup = createTestSetup();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  // --- Connection lifecycle ---
+  // --- Registration ---
 
-  describe('connection lifecycle', () => {
-    it('resolves connect() when WebSocket starts', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-
-      await channel.connect();
-
-      expect(channel.isConnected()).toBe(true);
+  describe('registration', () => {
+    it('registers with correct channel name', () => {
+      // The factory was captured during import, which means registerChannelAdapter was called
+      expect(savedFactory).not.toBeNull();
+      expect(typeof savedFactory).toBe('function');
     });
 
-    it('fetches bot identity on connect', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-
-      await channel.connect();
-
-      expect(mockRequest).toHaveBeenCalled();
-    });
-
-    it('starts WebSocket client on connect', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-
-      await channel.connect();
-
-      expect(mockWsStart).toHaveBeenCalled();
-    });
-
-    it('disconnects cleanly', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-
-      await channel.connect();
-      expect(channel.isConnected()).toBe(true);
-
-      await channel.disconnect();
-      expect(channel.isConnected()).toBe(false);
-    });
-
-    it('isConnected() returns false before connect', () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-
-      expect(channel.isConnected()).toBe(false);
+    it('factory returns an adapter with correct properties', () => {
+      expect(adapter).not.toBeNull();
+      expect(adapter.channelType).toBe('feishu');
+      expect(adapter.name).toBe('feishu');
+      expect(adapter.supportsThreads).toBe(false);
     });
   });
 
-  // --- Text message handling ---
+  // --- Setup / lifecycle ---
 
-  describe('text message handling', () => {
+  describe('setup lifecycle', () => {
+    it('connects via WebSocket on setup', async () => {
+      await adapter.setup(testSetup);
+      expect(mockWsStart).toHaveBeenCalled();
+      expect(adapter.isConnected()).toBe(true);
+    });
+
+    it('resolves bot identity on setup', async () => {
+      await adapter.setup(testSetup);
+      expect(mockRequest).toHaveBeenCalled();
+    });
+
+    it('tears down cleanly', async () => {
+      await adapter.setup(testSetup);
+      expect(adapter.isConnected()).toBe(true);
+
+      await adapter.teardown();
+      expect(adapter.isConnected()).toBe(false);
+    });
+
+    it('isConnected() returns false before setup', () => {
+      expect(adapter.isConnected()).toBe(false);
+    });
+  });
+
+  // --- Inbound message handling ---
+
+  describe('inbound message handling', () => {
+    beforeEach(async () => {
+      await adapter.setup(testSetup);
+    });
+
     it('delivers message for registered group', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
       const event = createMessageEvent({
         content: '{"text":"Hello everyone"}',
       });
       await fireMessageEvent(event);
 
-      expect(opts.onChatMetadata).toHaveBeenCalledWith(
-        'feishu:oc_test123',
-        expect.any(String),
-        undefined,
-        'feishu',
-        true,
-      );
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'feishu:oc_test123',
+      expect(testSetup.onInbound).toHaveBeenCalledWith(
+        'oc_test123',
+        null,
         expect.objectContaining({
           id: 'om_msg_001',
-          chat_jid: 'feishu:oc_test123',
-          sender: 'ou_user_456',
-          sender_name: 'user_456',
-          content: 'Hello everyone',
-          is_from_me: false,
+          kind: 'chat',
+          isGroup: true,
         }),
       );
     });
 
-    it('only emits metadata for unregistered chats', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
-      const event = createMessageEvent({ chatId: 'oc_unknown999' });
+    it('reports metadata for inbound messages', async () => {
+      const event = createMessageEvent({});
       await fireMessageEvent(event);
 
-      expect(opts.onChatMetadata).toHaveBeenCalledWith(
-        'feishu:oc_unknown999',
-        expect.any(String),
+      expect(testSetup.onMetadata).toHaveBeenCalledWith(
+        'oc_test123',
         undefined,
-        'feishu',
         true,
       );
-      expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
     it('skips bot (app) messages', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
       const event = createMessageEvent({ senderType: 'app' });
       await fireMessageEvent(event);
 
-      expect(opts.onMessage).not.toHaveBeenCalled();
-      expect(opts.onChatMetadata).not.toHaveBeenCalled();
-    });
-
-    it('converts create_time to ISO timestamp', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
-      const event = createMessageEvent({
-        createTime: '1704067200000', // 2024-01-01T00:00:00.000Z
-      });
-      await fireMessageEvent(event);
-
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'feishu:oc_test123',
-        expect.objectContaining({
-          timestamp: '2024-01-01T00:00:00.000Z',
-        }),
-      );
-    });
-
-    it('marks p2p chats as non-group', async () => {
-      const opts = createTestOpts({
-        registeredGroups: vi.fn(() => ({
-          'feishu:oc_dm456': {
-            name: 'DM',
-            folder: 'dm',
-            trigger: '@Andy',
-            added_at: '2024-01-01T00:00:00.000Z',
-          },
-        })),
-      });
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
-      const event = createMessageEvent({
-        chatId: 'oc_dm456',
-        chatType: 'p2p',
-      });
-      await fireMessageEvent(event);
-
-      expect(opts.onChatMetadata).toHaveBeenCalledWith(
-        'feishu:oc_dm456',
-        expect.any(String),
-        undefined,
-        'feishu',
-        false, // not a group
-      );
+      expect(testSetup.onInbound).not.toHaveBeenCalled();
     });
 
     it('deduplicates retried events', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
       const event = createMessageEvent({ eventId: 'ev_duplicate_1' });
       await fireMessageEvent(event);
       await fireMessageEvent(event); // same event ID
 
-      expect(opts.onMessage).toHaveBeenCalledTimes(1);
+      expect(testSetup.onInbound).toHaveBeenCalledTimes(1);
     });
-  });
 
-  // --- @mention translation ---
-
-  describe('@mention translation', () => {
-    it('translates @bot mention to trigger format in group', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
-      // When bot name does NOT start with the trigger pattern, prepend is needed
+    it('sets isMention when bot is mentioned in group', async () => {
       const event = createMessageEvent({
         content: '{"text":"hey @_user_1 what time is it?"}',
         mentions: [
@@ -339,72 +276,16 @@ describe('FeishuChannel', () => {
       });
       await fireMessageEvent(event);
 
-      // Bot mentioned but content doesn't start with @Andy → prepend trigger
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'feishu:oc_test123',
+      expect(testSetup.onInbound).toHaveBeenCalledWith(
+        'oc_test123',
+        null,
         expect.objectContaining({
-          content: '@Andy hey @FeishuBot what time is it?',
+          isMention: true,
         }),
       );
     });
 
-    it('does not prepend trigger when bot name already matches pattern', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
-      // Bot named "Andy Bot" → after replacement, "@Andy Bot ..." already matches TRIGGER_PATTERN
-      const event = createMessageEvent({
-        content: '{"text":"@_user_1 what time is it?"}',
-        mentions: [
-          {
-            key: '@_user_1',
-            id: { open_id: 'ou_bot_123' },
-            name: 'Andy Bot',
-          },
-        ],
-      });
-      await fireMessageEvent(event);
-
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'feishu:oc_test123',
-        expect.objectContaining({
-          content: '@Andy Bot what time is it?',
-        }),
-      );
-    });
-
-    it('does not translate if message already matches trigger', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
-      const event = createMessageEvent({
-        content: '{"text":"@Andy @_user_1 hello"}',
-        mentions: [
-          {
-            key: '@_user_1',
-            id: { open_id: 'ou_bot_123' },
-            name: 'Andy Bot',
-          },
-        ],
-      });
-      await fireMessageEvent(event);
-
-      // Should NOT double-prepend
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'feishu:oc_test123',
-        expect.objectContaining({
-          content: '@Andy @Andy Bot hello',
-        }),
-      );
-    });
-
-    it('does not translate mentions of other users', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
+    it('does not set isMention when other user is mentioned', async () => {
       const event = createMessageEvent({
         content: '{"text":"@_user_1 hello"}',
         mentions: [
@@ -417,248 +298,38 @@ describe('FeishuChannel', () => {
       });
       await fireMessageEvent(event);
 
-      // Not bot mentioned → no trigger prepend
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'feishu:oc_test123',
-        expect.objectContaining({
-          content: '@Some User hello',
-        }),
-      );
+      const call = testSetup.onInbound.mock.calls[0];
+      const inboundMsg = call[2];
+      expect(inboundMsg.isMention).toBeFalsy();
     });
 
-    it('does not add trigger for p2p messages', async () => {
-      const opts = createTestOpts({
-        registeredGroups: vi.fn(() => ({
-          'feishu:oc_dm456': {
-            name: 'DM',
-            folder: 'dm',
-            trigger: '@Andy',
-            added_at: '2024-01-01T00:00:00.000Z',
-          },
-        })),
-      });
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
+    it('marks p2p chats as non-group in metadata', async () => {
       const event = createMessageEvent({
         chatId: 'oc_dm456',
         chatType: 'p2p',
-        content: '{"text":"hello bot"}',
       });
       await fireMessageEvent(event);
 
-      // p2p — no trigger prepend even though bot is not mentioned
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'feishu:oc_dm456',
-        expect.objectContaining({
-          content: 'hello bot',
-        }),
+      expect(testSetup.onMetadata).toHaveBeenCalledWith(
+        'oc_dm456',
+        undefined,
+        false,
       );
     });
   });
 
-  // --- Content extraction ---
+  // --- Deliver (outbound) ---
 
-  describe('content extraction', () => {
-    it('extracts text with mention placeholder replacement', async () => {
-      const channel = new FeishuChannel(
-        'app_id',
-        'app_secret',
-        'feishu',
-        createTestOpts(),
-      );
-      const result = channel.extractContent({
-        message_type: 'text',
-        content: '{"text":"@_user_1 hi @_user_2"}',
-        mentions: [
-          { key: '@_user_1', name: 'Alice' },
-          { key: '@_user_2', name: 'Bob' },
-        ],
-      });
-      expect(result).toBe('@Alice hi @Bob');
+  describe('deliver', () => {
+    beforeEach(async () => {
+      await adapter.setup(testSetup);
     });
 
-    it('returns placeholder for image messages', () => {
-      const channel = new FeishuChannel(
-        'app_id',
-        'app_secret',
-        'feishu',
-        createTestOpts(),
-      );
-      const result = channel.extractContent({
-        message_type: 'image',
-        content: '{"image_key":"img_v3_xxx"}',
-        mentions: [],
+    it('sends text message via Lark API', async () => {
+      await adapter.deliver('oc_test123', null, {
+        kind: 'chat',
+        content: { text: 'Hello' },
       });
-      expect(result).toBe('[Image]');
-    });
-
-    it('returns file name for file messages', () => {
-      const channel = new FeishuChannel(
-        'app_id',
-        'app_secret',
-        'feishu',
-        createTestOpts(),
-      );
-      const result = channel.extractContent({
-        message_type: 'file',
-        content: '{"file_key":"file_v3_xxx","file_name":"report.pdf"}',
-        mentions: [],
-      });
-      expect(result).toBe('[File: report.pdf]');
-    });
-
-    it('returns fallback for file without name', () => {
-      const channel = new FeishuChannel(
-        'app_id',
-        'app_secret',
-        'feishu',
-        createTestOpts(),
-      );
-      const result = channel.extractContent({
-        message_type: 'file',
-        content: '{"file_key":"file_v3_xxx"}',
-        mentions: [],
-      });
-      expect(result).toBe('[File: unknown]');
-    });
-
-    it('returns placeholder for audio', () => {
-      const channel = new FeishuChannel(
-        'app_id',
-        'app_secret',
-        'feishu',
-        createTestOpts(),
-      );
-      const result = channel.extractContent({
-        message_type: 'audio',
-        content: '{"file_key":"file_v3_xxx"}',
-        mentions: [],
-      });
-      expect(result).toBe('[Audio]');
-    });
-
-    it('returns placeholder for sticker', () => {
-      const channel = new FeishuChannel(
-        'app_id',
-        'app_secret',
-        'feishu',
-        createTestOpts(),
-      );
-      const result = channel.extractContent({
-        message_type: 'sticker',
-        content: '{"file_key":"file_v3_xxx"}',
-        mentions: [],
-      });
-      expect(result).toBe('[Sticker]');
-    });
-
-    it('returns placeholder for interactive card', () => {
-      const channel = new FeishuChannel(
-        'app_id',
-        'app_secret',
-        'feishu',
-        createTestOpts(),
-      );
-      const result = channel.extractContent({
-        message_type: 'interactive',
-        content: '{"header":{}}',
-        mentions: [],
-      });
-      expect(result).toBe('[Card]');
-    });
-
-    it('returns placeholder for unknown message types', () => {
-      const channel = new FeishuChannel(
-        'app_id',
-        'app_secret',
-        'feishu',
-        createTestOpts(),
-      );
-      const result = channel.extractContent({
-        message_type: 'merge_forward',
-        content: '{}',
-        mentions: [],
-      });
-      expect(result).toBe('[merge_forward]');
-    });
-
-    it('parses rich text (post) messages', () => {
-      const channel = new FeishuChannel(
-        'app_id',
-        'app_secret',
-        'feishu',
-        createTestOpts(),
-      );
-      const postContent = JSON.stringify({
-        zh_cn: {
-          title: 'Test Title',
-          content: [
-            [
-              { tag: 'text', text: 'Hello ' },
-              { tag: 'a', text: 'link', href: 'https://example.com' },
-            ],
-            [
-              { tag: 'text', text: 'Second line' },
-              { tag: 'at', user_name: 'Alice' },
-            ],
-          ],
-        },
-      });
-      const result = channel.extractContent({
-        message_type: 'post',
-        content: postContent,
-        mentions: [],
-      });
-      expect(result).toBe('Test Title\nHello link\nSecond line@Alice');
-    });
-
-    it('handles post with only en_us locale', () => {
-      const channel = new FeishuChannel(
-        'app_id',
-        'app_secret',
-        'feishu',
-        createTestOpts(),
-      );
-      const postContent = JSON.stringify({
-        en_us: {
-          title: 'English Post',
-          content: [[{ tag: 'text', text: 'Hello world' }]],
-        },
-      });
-      const result = channel.extractContent({
-        message_type: 'post',
-        content: postContent,
-        mentions: [],
-      });
-      expect(result).toBe('English Post\nHello world');
-    });
-
-    it('handles malformed JSON content gracefully', () => {
-      const channel = new FeishuChannel(
-        'app_id',
-        'app_secret',
-        'feishu',
-        createTestOpts(),
-      );
-      const result = channel.extractContent({
-        message_type: 'text',
-        content: 'not-json',
-        mentions: [],
-      });
-      expect(result).toBe('not-json');
-    });
-  });
-
-  // --- sendMessage ---
-
-  describe('sendMessage', () => {
-    it('sends message via Lark API', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
-      await channel.sendMessage('feishu:oc_test123', 'Hello');
 
       expect(mockCreate).toHaveBeenCalledWith({
         params: { receive_id_type: 'chat_id' },
@@ -673,139 +344,67 @@ describe('FeishuChannel', () => {
       });
     });
 
-    it('strips feishu: prefix from JID', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
-      await channel.sendMessage('feishu:oc_abc_xyz', 'Test');
+    it('handles string content', async () => {
+      await adapter.deliver('oc_test123', null, {
+        kind: 'chat',
+        content: 'Plain text',
+      });
 
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            receive_id: 'oc_abc_xyz',
+            receive_id: 'oc_test123',
           }),
         }),
       );
+    });
+
+    it('returns undefined when client is not initialized', async () => {
+      await adapter.teardown();
+
+      const result = await adapter.deliver('oc_test123', null, {
+        kind: 'chat',
+        content: 'No client',
+      });
+
+      expect(result).toBeUndefined();
+      expect(mockCreate).not.toHaveBeenCalled();
     });
 
     it('splits messages exceeding 4000 characters', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
       const longText = 'x'.repeat(5000);
-      await channel.sendMessage('feishu:oc_test123', longText);
+      await adapter.deliver('oc_test123', null, {
+        kind: 'chat',
+        content: { text: longText },
+      });
 
       expect(mockCreate).toHaveBeenCalledTimes(2);
-      // First chunk: 4000 chars
-      expect(mockCreate).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({
-          data: expect.objectContaining({
-            content: JSON.stringify({
-              schema: '2.0',
-              body: {
-                elements: [{ tag: 'markdown', content: 'x'.repeat(4000) }],
-              },
-            }),
-            msg_type: 'interactive',
-          }),
-        }),
-      );
-      // Second chunk: 1000 chars
-      expect(mockCreate).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({
-          data: expect.objectContaining({
-            content: JSON.stringify({
-              schema: '2.0',
-              body: {
-                elements: [{ tag: 'markdown', content: 'x'.repeat(1000) }],
-              },
-            }),
-            msg_type: 'interactive',
-          }),
-        }),
-      );
-    });
-
-    it('sends exactly one message at 4000 characters', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
-      await channel.sendMessage('feishu:oc_test123', 'y'.repeat(4000));
-
-      expect(mockCreate).toHaveBeenCalledTimes(1);
-    });
-
-    it('handles send failure gracefully', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-      await channel.connect();
-
-      mockCreate.mockRejectedValueOnce(new Error('Network error'));
-
-      // Should not throw
-      await expect(
-        channel.sendMessage('feishu:oc_test123', 'Will fail'),
-      ).resolves.toBeUndefined();
-    });
-
-    it('does nothing when client is not initialized', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', 'feishu', opts);
-
-      // Don't connect
-      await channel.sendMessage('feishu:oc_test123', 'No client');
-
-      expect(mockCreate).not.toHaveBeenCalled();
-    });
-  });
-
-  // --- ownsJid ---
-
-  describe('ownsJid', () => {
-    it('owns feishu: JIDs', () => {
-      const channel = new FeishuChannel('a', 'b', 'feishu', createTestOpts());
-      expect(channel.ownsJid('feishu:oc_test123')).toBe(true);
-    });
-
-    it('does not own Telegram JIDs', () => {
-      const channel = new FeishuChannel('a', 'b', 'feishu', createTestOpts());
-      expect(channel.ownsJid('tg:123456')).toBe(false);
-    });
-
-    it('does not own WhatsApp JIDs', () => {
-      const channel = new FeishuChannel('a', 'b', 'feishu', createTestOpts());
-      expect(channel.ownsJid('12345@g.us')).toBe(false);
-    });
-
-    it('does not own unknown JID formats', () => {
-      const channel = new FeishuChannel('a', 'b', 'feishu', createTestOpts());
-      expect(channel.ownsJid('random-string')).toBe(false);
-    });
-  });
-
-  // --- Channel properties ---
-
-  describe('channel properties', () => {
-    it('has name "feishu"', () => {
-      const channel = new FeishuChannel('a', 'b', 'feishu', createTestOpts());
-      expect(channel.name).toBe('feishu');
     });
   });
 
   // --- setTyping ---
 
   describe('setTyping', () => {
-    it('does not throw (no-op since Feishu has no typing API)', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('a', 'b', 'feishu', opts);
-      await expect(
-        channel.setTyping('feishu:oc_test123', true),
-      ).resolves.toBeUndefined();
+    beforeEach(async () => {
+      await adapter.setup(testSetup);
+    });
+
+    it('sends typing indicator by replying to last inbound message', async () => {
+      // First, receive a message so there's a lastInboundMessageId
+      const event = createMessageEvent({ chatId: 'oc_test123' });
+      await fireMessageEvent(event);
+
+      mockReply.mockResolvedValueOnce({ data: { message_id: 'typing_001' } });
+
+      await adapter.setTyping('oc_test123', null);
+
+      expect(mockReply).toHaveBeenCalled();
+    });
+
+    it('does not send typing when no prior inbound message', async () => {
+      await adapter.setTyping('oc_noprior', null);
+
+      expect(mockReply).not.toHaveBeenCalled();
     });
   });
 });

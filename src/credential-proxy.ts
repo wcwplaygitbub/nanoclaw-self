@@ -15,7 +15,7 @@ import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
 
 import { readEnvFile } from './env.js';
-import { logger } from './logger.js';
+import { log } from './log.js';
 
 export type AuthMode = 'api-key' | 'oauth';
 
@@ -99,10 +99,7 @@ export function startCredentialProxy(
         );
 
         upstream.on('error', (err) => {
-          logger.error(
-            { err, url: req.url },
-            'Credential proxy upstream error',
-          );
+          log.error('Credential proxy upstream error', { err, url: req.url });
           if (!res.headersSent) {
             res.writeHead(502);
             res.end('Bad Gateway');
@@ -115,7 +112,7 @@ export function startCredentialProxy(
     });
 
     server.listen(port, host, () => {
-      logger.info({ port, host, authMode }, 'Credential proxy started');
+      log.info('Credential proxy started', { port, host, authMode });
       resolve(server);
     });
 

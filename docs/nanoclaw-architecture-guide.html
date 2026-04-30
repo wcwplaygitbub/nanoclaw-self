@@ -1,0 +1,2141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NanoClaw 项目架构全解</title>
+<style>
+  :root {
+    --bg: #0f0f13;
+    --surface: #1a1a24;
+    --surface2: #22222e;
+    --border: #2d2d3d;
+    --text: #e0e0e8;
+    --text2: #9898a8;
+    --accent: #7c6aef;
+    --accent2: #5b4cc4;
+    --green: #4ade80;
+    --orange: #fb923c;
+    --red: #f87171;
+    --cyan: #22d3ee;
+    --pink: #f472b6;
+    --yellow: #facc15;
+    --blue: #60a5fa;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, 'SF Pro Text', 'Noto Sans SC', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* Hero */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    background: radial-gradient(ellipse at 30% 50%, rgba(124,106,239,0.12) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 30%, rgba(34,211,238,0.08) 0%, transparent 50%);
+    animation: heroGlow 15s ease-in-out infinite alternate;
+  }
+  @keyframes heroGlow {
+    0% { transform: translate(0, 0) rotate(0deg); }
+    100% { transform: translate(-3%, 2%) rotate(3deg); }
+  }
+  .hero-title {
+    font-size: clamp(3rem, 8vw, 6rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    position: relative;
+    background: linear-gradient(135deg, var(--accent), var(--cyan));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero-sub {
+    font-size: 1.25rem;
+    color: var(--text2);
+    margin-top: 1rem;
+    position: relative;
+    max-width: 600px;
+  }
+  .hero-scroll {
+    position: absolute;
+    bottom: 2rem;
+    animation: bounce 2s infinite;
+    color: var(--text2);
+    font-size: 0.85rem;
+  }
+  @keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(8px); }
+  }
+
+  /* Nav */
+  .toc {
+    position: fixed;
+    left: 0; top: 0;
+    width: 240px;
+    height: 100vh;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 2rem 1rem;
+    overflow-y: auto;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.3s;
+  }
+  .toc.open { transform: translateX(0); }
+  .toc-title { font-size: 0.75rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 1rem; }
+  .toc a {
+    display: block;
+    padding: 0.4rem 0.75rem;
+    color: var(--text2);
+    text-decoration: none;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+  .toc a:hover, .toc a.active { color: var(--accent); background: rgba(124,106,239,0.1); }
+  .toc-toggle {
+    position: fixed;
+    top: 1rem; left: 1rem;
+    width: 40px; height: 40px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 1.2rem;
+    cursor: pointer;
+    z-index: 101;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.2s;
+  }
+  .toc-toggle:hover { background: var(--accent2); }
+
+  /* Content */
+  .content {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 2rem;
+  }
+
+  .section {
+    padding: 6rem 0;
+    opacity: 0;
+    transform: translateY(30px);
+    transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .section.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .section-num {
+    font-size: 0.75rem;
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+  }
+  .section-title {
+    font-size: 2.5rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 1.5rem;
+    line-height: 1.2;
+  }
+
+  .section p { margin-bottom: 1rem; color: var(--text2); font-size: 1.05rem; }
+  .section strong { color: var(--text); }
+
+  /* Cards */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    transition: transform 0.2s, border-color 0.2s;
+  }
+  .card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .card-icon { font-size: 2rem; margin-bottom: 0.75rem; }
+  .card h3 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+  .card p { font-size: 0.9rem; color: var(--text2); margin-bottom: 0; }
+
+  /* Diagrams */
+  .diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+    margin: 1.5rem 0;
+    overflow-x: auto;
+  }
+  .diagram pre {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre;
+  }
+  .diagram .d-arrow { color: var(--accent); }
+  .diagram .d-label { color: var(--cyan); }
+  .diagram .d-box { color: var(--green); }
+  .diagram .d-note { color: var(--text2); font-style: italic; }
+  .diagram .d-key { color: var(--orange); }
+  .diagram .d-warn { color: var(--red); }
+
+  /* Flow */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 1.5rem 0;
+  }
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  .flow-num {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    background: var(--accent);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.9rem;
+    margin-top: 2px;
+  }
+  .flow-body {
+    flex: 1;
+    padding-bottom: 1.5rem;
+    border-left: 2px solid var(--border);
+    padding-left: 1.5rem;
+    margin-left: -19px;
+  }
+  .flow-step:last-child .flow-body { border-left: none; padding-bottom: 0; }
+  .flow-body h4 { font-size: 1rem; margin-bottom: 0.25rem; }
+  .flow-body p { font-size: 0.9rem; color: var(--text2); margin-bottom: 0.25rem; }
+  .flow-code {
+    font-family: 'SF Mono', monospace;
+    font-size: 0.8rem;
+    background: var(--surface2);
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    margin-top: 0.5rem;
+    color: var(--cyan);
+    display: inline-block;
+  }
+
+  /* Table */
+  .styled-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5rem 0;
+    font-size: 0.9rem;
+  }
+  .styled-table th {
+    text-align: left;
+    padding: 0.75rem 1rem;
+    background: var(--surface2);
+    color: var(--accent);
+    font-weight: 600;
+    border-bottom: 2px solid var(--border);
+  }
+  .styled-table td {
+    padding: 0.65rem 1rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text2);
+  }
+  .styled-table tr:hover td { background: rgba(124,106,239,0.05); }
+  .styled-table code {
+    font-family: 'SF Mono', monospace;
+    font-size: 0.82rem;
+    background: var(--surface2);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    color: var(--cyan);
+  }
+
+  /* DB visual */
+  .db-visual {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    margin: 1.5rem 0;
+  }
+  @media (max-width: 768px) {
+    .db-visual { grid-template-columns: 1fr; }
+  }
+  .db-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .db-box-header {
+    padding: 0.75rem 1rem;
+    font-weight: 700;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .db-box-header.host { background: rgba(74,222,128,0.15); color: var(--green); }
+  .db-box-header.container { background: rgba(96,165,250,0.15); color: var(--blue); }
+  .db-box-header.central { background: rgba(124,106,239,0.15); color: var(--accent); }
+  .db-box-body { padding: 1rem; }
+  .db-table {
+    margin-bottom: 1rem;
+  }
+  .db-table:last-child { margin-bottom: 0; }
+  .db-table-name {
+    font-family: 'SF Mono', monospace;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--yellow);
+    margin-bottom: 0.35rem;
+  }
+  .db-table-desc {
+    font-size: 0.82rem;
+    color: var(--text2);
+    padding-left: 0.75rem;
+    border-left: 2px solid var(--border);
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin: 1.5rem 0 0;
+    border-bottom: 2px solid var(--border);
+  }
+  .tab-btn {
+    padding: 0.5rem 1rem;
+    background: none;
+    border: none;
+    color: var(--text2);
+    font-size: 0.9rem;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content {
+    display: none;
+    padding: 1.5rem 0;
+  }
+  .tab-content.active { display: block; }
+
+  /* Badge */
+  .badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .badge-green { background: rgba(74,222,128,0.15); color: var(--green); }
+  .badge-blue { background: rgba(96,165,250,0.15); color: var(--blue); }
+  .badge-orange { background: rgba(251,146,60,0.15); color: var(--orange); }
+  .badge-red { background: rgba(248,113,113,0.15); color: var(--red); }
+  .badge-cyan { background: rgba(34,211,238,0.15); color: var(--cyan); }
+  .badge-pink { background: rgba(244,114,182,0.15); color: var(--pink); }
+
+  /* Callout */
+  .callout {
+    background: var(--surface);
+    border-left: 4px solid var(--accent);
+    border-radius: 0 12px 12px 0;
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+  }
+  .callout.warn { border-left-color: var(--orange); }
+  .callout.danger { border-left-color: var(--red); }
+  .callout-title { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.25rem; }
+  .callout p { font-size: 0.9rem; margin-bottom: 0; }
+
+  /* Divider */
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 4rem 0;
+  }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--text2);
+    font-size: 0.85rem;
+    border-top: 1px solid var(--border);
+  }
+
+  /* Responsive */
+  @media (max-width: 640px) {
+    .content { padding: 0 1rem; }
+    .section-title { font-size: 1.75rem; }
+    .hero-title { font-size: 2.5rem; }
+    .db-visual { grid-template-columns: 1fr; }
+    .card-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- TOC Toggle -->
+<button class="toc-toggle" onclick="document.querySelector('.toc').classList.toggle('open')" aria-label="Toggle navigation">&#9776;</button>
+
+<!-- TOC -->
+<nav class="toc">
+  <div class="toc-title">目录</div>
+  <a href="#overview">项目概览</a>
+  <a href="#architecture">整体架构</a>
+  <a href="#channel">频道适配器</a>
+  <a href="#routing">消息路由</a>
+  <a href="#session">会话与上下文</a>
+  <a href="#database">数据库设计</a>
+  <a href="#central-db">中央数据库详解</a>
+  <a href="#lifecycle">消息生命周期</a>
+  <a href="#sdk-continuity">SDK 会话续接</a>
+  <a href="#compact">上下文压缩</a>
+  <a href="#files">文件访问与安全</a>
+  <a href="#feishu">飞书频道</a>
+  <a href="#skills">Skill 与 MCP 配置</a>
+  <a href="#onecli">OneCLI 凭证网关</a>
+  <a href="#summary">核心要点</a>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-title">NanoClaw</div>
+  <p class="hero-sub">个人 Claude 助手平台 &mdash; 从消息路由到容器隔离，完整架构解析</p>
+  <div class="hero-scroll">&#8595; 向下滚动探索</div>
+</section>
+
+<div class="content">
+
+<!-- ===== 1. Overview ===== -->
+<section class="section" id="overview">
+  <div class="section-num">01 / 项目概览</div>
+  <h2 class="section-title">NanoClaw 是什么</h2>
+  <p>NanoClaw 是一个<strong>单进程 Node.js 应用</strong>，让你通过飞书、Telegram、Discord、Slack、WhatsApp 等聊天平台跟 Claude 对话。它不是简单的消息转发——每个对话都有独立的容器、文件系统、记忆和工具。</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-icon">&#128172;</div>
+      <h3>多频道接入</h3>
+      <p>飞书、Telegram、Discord、Slack、WhatsApp、iMessage、邮件……通过适配器模式统一接入</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#128051;</div>
+      <h3>容器隔离</h3>
+      <p>每个 Agent Group 运行在独立 Docker 容器里，文件系统、工具、记忆完全隔离</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#129504;</div>
+      <h3>Claude Agent SDK</h3>
+      <p>容器内运行 Claude Agent SDK，支持 Bash、文件操作、MCP 工具等完整能力</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#128274;</div>
+      <h3>凭证安全</h3>
+      <p>容器永远看不到 API Key，通过本地代理注入凭证，OneCLI 管理密钥</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">核心设计哲学</div>
+    <p>消息路由（Host）与 Agent 执行（Container）彻底分离。Host 只管收发消息和调度，Container 只管思考和行动，两者通过 SQLite DB 跨 mount 通信。</p>
+  </div>
+</section>
+
+<!-- ===== 2. Architecture ===== -->
+<section class="section" id="architecture">
+  <div class="section-num">02 / 整体架构</div>
+  <h2 class="section-title">系统全貌</h2>
+
+  <div class="diagram">
+<pre>
+<span class="d-note">     用户侧                                          平台侧</span>
+
+  &#128241; 飞书群      &#128172; Telegram     &#128225; Discord      &#9993; 邮件
+     │              │               │              │
+     └──────────────┴───────────────┴──────────────┘
+                         │
+                    <span class="d-arrow">&#9660; Channel Adapters</span>
+                         │
+  <span class="d-box"> ┌──────────────────────────────────────────────────────┐ </span>
+  <span class="d-box"> │              NanoClaw Host (单进程)                    │ </span>
+  <span class="d-box"> │                                                       │ </span>
+  <span class="d-box"> │  router.ts ─── messaging_groups ─── agents ─── gates   │ </span>
+  <span class="d-box"> │       │                                                │ </span>
+  <span class="d-box"> │       ▼                                                │ </span>
+  <span class="d-box"> │  session-manager.ts                                    │ </span>
+  <span class="d-box"> │       │  写入 inbound.db                               │ </span>
+  <span class="d-box"> │       ▼                                                │ </span>
+  <span class="d-box"> │  container-runner.ts ──── wake container               │ </span>
+  <span class="d-box"> └──────────────┬───────────────────────────────────────────┘ </span>
+                  │
+             <span class="d-arrow">&#9660; Volume Mount</span>
+                  │
+  <span class="d-box"> ┌──────────────┴───────────────────────────────────────────┐ </span>
+  <span class="d-box"> │              Docker Container                            │ </span>
+  <span class="d-box"> │                                                          │ </span>
+  <span class="d-box"> │  agent-runner (poll loop)                                │ </span>
+  <span class="d-box"> │       │                                                  │ </span>
+  <span class="d-box"> │       ├─ 读 inbound.db ──→ Claude Agent SDK             │ </span>
+  <span class="d-box"> │       ├─ SDK 回复 ──→ 写 outbound.db                    │ </span>
+  <span class="d-box"> │       └─ MCP Tools (文件、搜索、定时任务...)             │ </span>
+  <span class="d-box"> └──────────────────────────────────────────────────────────┘ </span>
+                  │
+             <span class="d-arrow">&#9660; Host 读 outbound.db</span>
+                  │
+             投递到平台 &#128232;
+</pre>
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">为什么用 SQLite 而不是 HTTP 通信？</div>
+    <p>容器通过 VirtioFS 挂载宿主机目录。SQLite 跨 mount 写入需要独占——用两个 DB 文件（inbound.db + outbound.db），Host 和 Container 各写各的，互不冲突。HTTP 需要额外端口和网络配置，SQLite 更简单可靠。</p>
+  </div>
+</section>
+
+<!-- ===== 3. Channel ===== -->
+<section class="section" id="channel">
+  <div class="section-num">03 / 频道适配器</div>
+  <h2 class="section-title">Channel Adapter 模式</h2>
+
+  <p>每个聊天平台是一个<strong>频道适配器</strong>，遵循统一的 <code>ChannelAdapter</code> 接口，在启动时<strong>自注册</strong>到 registry。</p>
+
+  <div class="diagram">
+<pre>
+<span class="d-label">src/channels/index.ts  (barrel file)</span>
+  import './cli.js'
+  import './feishu.js'       <span class="d-note">← 每个 import 触发 registerChannelAdapter()</span>
+  import './telegram.js'
+  ...
+
+<span class="d-label">src/channels/feishu.ts  (自注册)</span>
+  function createAdapter(): ChannelAdapter | null {
+    const env = readEnvFile([...]);
+    if (!env.APP_ID) return null;       <span class="d-note">← 没凭证就不注册</span>
+    return { name, setup, deliver, ... };
+  }
+  registerChannelAdapter('feishu', { factory: createAdapter });  <span class="d-note">← 侧效应注册</span>
+</pre>
+  </div>
+
+  <table class="styled-table">
+    <thead>
+      <tr><th>接口方法</th><th>职责</th><th>谁调用</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>setup(config)</code></td><td>建立连接，注册回调</td><td>Host 启动时</td></tr>
+      <tr><td><code>deliver(platformId, threadId, msg)</code></td><td>发送消息到平台</td><td>Delivery poll</td></tr>
+      <tr><td><code>setTyping(platformId, threadId)</code></td><td>显示"正在输入"</td><td>Typing refresh</td></tr>
+      <tr><td><code>teardown()</code></td><td>断开连接</td><td>Host 关闭时</td></tr>
+      <tr><td><code>isConnected()</code></td><td>连接状态</td><td>Health check</td></tr>
+    </tbody>
+  </table>
+
+  <p><code>setup()</code> 接收的 <code>ChannelSetup</code> 包含四个回调：</p>
+
+  <table class="styled-table">
+    <thead>
+      <tr><th>回调</th><th>触发时机</th><th>数据</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>onInbound(platformId, threadId, message)</code></td><td>收到用户消息</td><td>消息内容 + 元数据</td></tr>
+      <tr><td><code>onMetadata(platformId, name, isGroup)</code></td><td>频道信息发现</td><td>群/私聊标记</td></tr>
+      <tr><td><code>onInboundEvent(event)</code></td><td>按钮点击等事件</td><td>questionId + 选项</td></tr>
+      <tr><td><code>onAction(questionId, option, userId)</code></td><td>用户操作</td><td>交互式卡片</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ===== 4. Routing ===== -->
+<section class="section" id="routing">
+  <div class="section-num">04 / 消息路由</div>
+  <h2 class="section-title">一条消息的旅程</h2>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-num">1</div>
+      <div class="flow-body">
+        <h4>平台消息到达</h4>
+        <p>Channel Adapter 调用 <code>onInbound()</code>，生成 <code>InboundEvent</code></p>
+        <div class="flow-code">{ channelType: 'feishu', platformId: 'oc_group_abc', message: { content: '...', isMention: true } }</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">2</div>
+      <div class="flow-body">
+        <h4>查找或创建 MessagingGroup</h4>
+        <p>以 <code>(channel_type, platform_id)</code> 为 key 查找。群聊中 @bot 才自动创建，普通消息静默忽略</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">3</div>
+      <div class="flow-body">
+        <h4>Sender Resolution</h4>
+        <p>权限模块解析发送者身份（可选，无模块时 userId=null）</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">4</div>
+      <div class="flow-body">
+        <h4>Fan-out 到所有 Wired Agent</h4>
+        <p>一个群可以接入多个 agent，每个独立评估是否 engage</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">5</div>
+      <div class="flow-body">
+        <h4>Engage Mode 评估</h4>
+        <p>三种模式决定 agent 是否响应：</p>
+        <table class="styled-table">
+          <thead><tr><th>模式</th><th>触发条件</th></tr></thead>
+          <tbody>
+            <tr><td><code>pattern</code></td><td>正则匹配消息文本（<code>.</code> = 永远响应）</td></tr>
+            <tr><td><code>mention</code></td><td>必须 @bot</td></tr>
+            <tr><td><code>mention-sticky</code></td><td>@bot 或已有活跃 session 的线程</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">6</div>
+      <div class="flow-body">
+        <h4>Access Gate + Sender Scope</h4>
+        <p>权限检查（无模块时默认 allow-all）</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">7</div>
+      <div class="flow-body">
+        <h4>Resolve / Create Session</h4>
+        <p>根据 session_mode 确定会话：</p>
+        <table class="styled-table">
+          <thead><tr><th>Session Mode</th><th>Session Key</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>shared</code></td><td>(agent, messaging_group)</td><td>同群共享一个 session</td></tr>
+            <tr><td><code>per-thread</code></td><td>(agent, messaging_group, thread)</td><td>每个线程独立 session</td></tr>
+            <tr><td><code>agent-shared</code></td><td>(agent_group)</td><td>跨频道共享一个 session</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">8</div>
+      <div class="flow-body">
+        <h4>写入 inbound.db + 唤醒容器</h4>
+        <p>消息存入 <code>messages_in</code> 表，触发 <code>wakeContainer()</code></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">MessagingGroup 确定规则</div>
+    <p>由 <code>(channel_type, platform_id)</code> 唯一确定。飞书群聊的 platform_id = 群 chat_id（所有人共享）；飞书私聊的 platform_id = P2P chat_id（每人独立）。不同 channel_type 天然隔离。</p>
+  </div>
+</section>
+
+<!-- ===== 5. Session ===== -->
+<section class="section" id="session">
+  <div class="section-num">05 / 会话与上下文</div>
+  <h2 class="section-title">Session 的隔离与共享</h2>
+
+  <p>Session 是 NanoClaw 中<strong>上下文隔离的最小单位</strong>。Session key <strong>不包含 user_id</strong>——它是按对话划分的，不是按用户划分的。</p>
+
+  <div class="diagram">
+<pre>
+<span class="d-label">飞书群聊 (oc_group_abc)</span>
+
+  张三: "帮我查天气"  ──┐
+  李四: "那上海呢"    ──┤── 同一个 messaging_group
+  王五: "谢谢"       ──┘
+         │
+         ▼
+  <span class="d-box">Session A (shared 模式)</span>
+  张三、李四、王五的消息都进同一个 session
+  Claude 看到所有人的对话 → 上下文共享
+
+<span class="d-label">────────────────────────────────────────</span>
+
+<span class="d-label">飞书私聊</span>
+
+  张三私聊 → platform_id=oc_dm_zhang → <span class="d-box">Session B</span> (只有张三的对话)
+  李四私聊 → platform_id=oc_dm_li   → <span class="d-box">Session C</span> (只有李四的对话)
+  两人各自独立，互不影响
+
+<span class="d-label">────────────────────────────────────────</span>
+
+<span class="d-label">跨频道</span>
+
+  (feishu, oc_xxx) → <span class="d-box">MessagingGroup A</span> → Session X
+  (discord, chan-1) → <span class="d-box">MessagingGroup B</span> → Session Y
+  完全隔离，即使 platform_id 碰巧一样
+</pre>
+  </div>
+
+  <div class="callout warn">
+    <div class="callout-title">群聊中所有人共享上下文</div>
+    <p>在飞书群里，所有人的消息进入同一个 session。Claude 看到的是完整的群聊记录，不区分说话人（sender 信息只是消息里的一个字段）。如果你需要"每个人有独立上下文"，应该用私聊。</p>
+  </div>
+</section>
+
+<!-- ===== 6. Database ===== -->
+<section class="section" id="database">
+  <div class="section-num">06 / 数据库设计</div>
+  <h2 class="section-title">三个数据库，各司其职</h2>
+
+  <p>NanoClaw 有三类数据库文件，<strong>它们不在同一个 SQLite 里，没有外键关联</strong>。关系全靠代码逻辑串起来。</p>
+
+  <div class="db-visual">
+    <!-- Central DB -->
+    <div class="db-box">
+      <div class="db-box-header central">&#128451; nanoclaw.db</div>
+      <div class="db-box-body">
+        <div style="font-size:0.8rem; color:var(--text2); margin-bottom:0.75rem;">全局唯一，进程级</div>
+        <div class="db-table">
+          <div class="db-table-name">sessions</div>
+          <div class="db-table-desc">会话记录 — id, agent_group_id, messaging_group_id, thread_id, status</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">messaging_groups</div>
+          <div class="db-table-desc">频道对话 — (channel_type, platform_id) 唯一</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">agent_groups</div>
+          <div class="db-table-desc">Agent 定义 — id, name, folder</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">messaging_group_agents</div>
+          <div class="db-table-desc">接线关系 — engage_mode, session_mode, priority</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">users / user_roles</div>
+          <div class="db-table-desc">用户与权限</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inbound DB -->
+    <div class="db-box">
+      <div class="db-box-header host">&#9998; inbound.db</div>
+      <div class="db-box-body">
+        <div style="font-size:0.8rem; color:var(--text2); margin-bottom:0.75rem;">每 session 一个，Host 写</div>
+        <div class="db-table">
+          <div class="db-table-name">messages_in</div>
+          <div class="db-table-desc">用户消息 — seq(偶数), status, trigger, content</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">delivered</div>
+          <div class="db-table-desc">已投递记录 — 避免重复投递 agent 回复</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">destinations</div>
+          <div class="db-table-desc">消息目标 — agent 可发给谁</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">session_routing</div>
+          <div class="db-table-desc">默认回复地址 — channel_type + platform_id</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Outbound DB -->
+    <div class="db-box">
+      <div class="db-box-header container">&#128190; outbound.db</div>
+      <div class="db-box-body">
+        <div style="font-size:0.8rem; color:var(--text2); margin-bottom:0.75rem;">每 session 一个，Container 写</div>
+        <div class="db-table">
+          <div class="db-table-name">messages_out</div>
+          <div class="db-table-desc">Agent 回复 — seq(奇数), platform_id, content</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">processing_ack</div>
+          <div class="db-table-desc">处理确认 — pending→processing→completed</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">session_state</div>
+          <div class="db-table-desc">SDK session ID — continuation:claude = abc-123</div>
+        </div>
+        <div class="db-table">
+          <div class="db-table-name">container_state</div>
+          <div class="db-table-desc">当前执行的工具 — Host 用来判断是否卡住</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout danger">
+    <div class="callout-title">为什么分两个 DB？</div>
+    <p>跨 VirtioFS mount 只能一方写 SQLite。如果 Host 和 Container 同时写同一个 DB，WAL 模式的 mmapped -shm 不会跨 mount 刷新，Container 会静默丢失新消息。所以用 <code>journal_mode=DELETE</code> + 两个文件，Host 写 inbound.db，Container 写 outbound.db，各写各的。</p>
+  </div>
+
+  <h3 style="margin-top:2rem; margin-bottom:1rem;">seq 偶数/奇数设计</h3>
+  <div class="diagram">
+<pre>
+<span class="d-label">messages_in.seq  = 偶数 (2, 4, 6, 8, ...)</span>  <span class="d-note">← Host 写</span>
+<span class="d-label">messages_out.seq = 奇数  (1, 3, 5, 7, ...)</span>  <span class="d-note">← Container 写</span>
+
+为什么？当 agent 要"编辑消息 #5"时，奇偶分立确保不会把 outbound 的 seq=5
+误认为是 inbound 的 seq=5。两个命名空间，永不碰撞。
+</pre>
+  </div>
+</section>
+
+<!-- ===== 7. Central DB ===== -->
+<section class="section" id="central-db">
+  <div class="section-num">07 / 中央数据库详解</div>
+  <h2 class="section-title">nanoclaw.db 14 张表的关系</h2>
+
+  <p>nanoclaw.db 是全局唯一的中央数据库，所有路由、会话、权限都依赖它。14 张表可以分成<strong>四个领域</strong>来理解。</p>
+
+  <!-- === ER Diagram === -->
+  <h3 style="margin-top:2rem; margin-bottom:1rem;">表关系全景图</h3>
+  <div class="diagram">
+<pre>
+<span class="d-note">──── 核心领域：Agent ↔ Channel 接线 ────</span>
+
+  <span class="d-box">agent_groups</span>                 <span class="d-box">messaging_groups</span>
+   id: ag-assistant              id: mg-feishu-abc
+   name: "我的助手"               channel_type: feishu
+   folder: "main"                platform_id: oc_group_abc
+        │                              │
+        └───── <span class="d-key">messaging_group_agents</span> ──────┘
+                  多对多中间表
+                  engage_mode / session_mode / sender_scope
+                  priority / ignored_message_policy
+
+<span class="d-note">──── 会话领域 ────</span>
+
+  <span class="d-box">agent_groups</span>.id ─┐
+                    ├─→ <span class="d-box">sessions</span>
+  <span class="d-box">messaging_groups</span>.id ─┘    agent_group_id + messaging_group_id + thread_id
+                             → 确定 session（容器 + 上下文）
+                                  │
+                                  └─→ <span class="d-box">pending_questions</span>
+                                       Agent 发给用户的交互式问题
+
+<span class="d-note">──── 用户与权限领域 ────</span>
+
+  <span class="d-box">users</span>
+   id: "feishu:ou_zhang"
+   kind: "feishu"
+   display_name: "张三"
+     │
+     ├── <span class="d-box">user_roles</span>           "张三是 owner"
+     │     user_id, role, agent_group_id
+     │
+     ├── <span class="d-box">agent_group_members</span>  "张三是 助手A 的 known member"
+     │     user_id, agent_group_id
+     │
+     └── <span class="d-box">user_dms</span>             "张三在飞书的 DM = mg-dm-zhang"
+           user_id, channel_type, messaging_group_id
+             └── 指回 messaging_groups（DM 也是一个 messaging_group）
+
+<span class="d-note">──── 审批与审计领域 ────</span>
+
+  <span class="d-box">pending_sender_approvals</span>   陌生用户审批
+  <span class="d-box">pending_channel_approvals</span>  新频道接入审批
+  <span class="d-box">pending_approvals</span>          通用审批（装包、MCP、OneCLI 凭证）
+  <span class="d-box">dropped_messages</span>           消息丢弃审计记录
+
+<span class="d-note">──── Agent 间通信 ────</span>
+
+  <span class="d-box">agent_destinations</span>
+   agent_group_id + local_name → target_type + target_id
+   没有行 = 不允许发送（同时也是 ACL）
+</pre>
+  </div>
+
+  <!-- === Table summary === -->
+  <h3 style="margin-top:2rem; margin-bottom:1rem;">14 张表速查</h3>
+  <table class="styled-table">
+    <thead>
+      <tr><th>领域</th><th>表名</th><th>一句话说明</th><th>关联的外键</th></tr>
+    </thead>
+    <tbody>
+      <tr><td rowspan="3" style="vertical-align:top;"><span class="badge badge-green">核心</span></td><td><code>agent_groups</code></td><td>Agent 定义（名字、工作目录）</td><td>—</td></tr>
+      <tr><td><code>messaging_groups</code></td><td>频道对话（飞书群、Discord 频道等）</td><td>—</td></tr>
+      <tr><td><code>messaging_group_agents</code></td><td>接线关系 + 行为配置</td><td>→ agent_groups, → messaging_groups</td></tr>
+      <tr><td rowspan="2" style="vertical-align:top;"><span class="badge badge-cyan">会话</span></td><td><code>sessions</code></td><td>会话记录，连接 agent 和对话</td><td>→ agent_groups, → messaging_groups</td></tr>
+      <tr><td><code>pending_questions</code></td><td>Agent 发给用户的交互式问题</td><td>→ sessions</td></tr>
+      <tr><td rowspan="4" style="vertical-align:top;"><span class="badge badge-orange">权限</span></td><td><code>users</code></td><td>平台用户标识</td><td>—</td></tr>
+      <tr><td><code>user_roles</code></td><td>用户权限（owner / admin）</td><td>→ users, → agent_groups</td></tr>
+      <tr><td><code>agent_group_members</code></td><td>Agent 的 known member 名单</td><td>→ users, → agent_groups</td></tr>
+      <tr><td><code>user_dms</code></td><td>用户私聊频道缓存</td><td>→ users, → messaging_groups</td></tr>
+      <tr><td rowspan="4" style="vertical-align:top;"><span class="badge badge-pink">审批</span></td><td><code>pending_sender_approvals</code></td><td>陌生用户审批</td><td>→ messaging_groups, → agent_groups</td></tr>
+      <tr><td><code>pending_channel_approvals</code></td><td>新频道接入审批</td><td>→ messaging_groups, → agent_groups</td></tr>
+      <tr><td><code>pending_approvals</code></td><td>通用审批（装包、MCP、凭证）</td><td>→ sessions, → agent_groups</td></tr>
+      <tr><td><code>dropped_messages</code></td><td>消息丢弃审计记录</td><td>弱关联 messaging_groups, agent_groups</td></tr>
+      <tr><td><span class="badge badge-blue">通信</span></td><td><code>agent_destinations</code></td><td>Agent 间通信目标 + ACL</td><td>→ agent_groups</td></tr>
+    </tbody>
+  </table>
+
+  <!-- === Concrete Example === -->
+  <h3 style="margin-top:2.5rem; margin-bottom:1rem;">实例：飞书群从零开始的完整建表过程</h3>
+
+  <p>假设你在飞书创建了一个群 <code>oc_project_2026</code>，接入了一个叫"小助"的 Agent。张三、李四是群成员。看看 nanoclaw.db 里会怎样一步步产生数据：</p>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-num">1</div>
+      <div class="flow-body">
+        <h4>系统初始化：创建 Agent Group</h4>
+        <p>首次 setup 时，管理员创建了 Agent "小助"</p>
+        <div class="diagram" style="margin-top:0.5rem;">
+<pre><span class="d-label">agent_groups 表</span>
+┌──────────────┬────────┬──────────┬─────────────┐
+│ id           │ name   │ folder   │ agent_prov. │
+├──────────────┼────────┼──────────┼─────────────┤
+│ <span class="d-key">ag-xiaozhu</span>   │ 小助   │ main     │ claude      │
+└──────────────┴────────┴──────────┴─────────────┘</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">2</div>
+      <div class="flow-body">
+        <h4>管理员接入频道：接线</h4>
+        <p>管理员把"小助"接入飞书群 <code>oc_project_2026</code>，设置 @bot 触发</p>
+        <div class="diagram" style="margin-top:0.5rem;">
+<pre><span class="d-label">messaging_groups 表</span>
+┌─────────────────┬──────────────┬─────────────────┬──────────┐
+│ id              │ channel_type │ platform_id     │ is_group │
+├─────────────────┼──────────────┼─────────────────┼──────────┤
+│ <span class="d-key">mg-feishu-proj</span>  │ feishu       │ oc_project_2026 │ 1        │
+└─────────────────┴──────────────┴─────────────────┴──────────┘
+
+<span class="d-label">messaging_group_agents 表（多对多接线）</span>
+┌──────────────┬─────────────────┬──────────────┬─────────────┬──────────────┐
+│ id           │ messaging_grp   │ agent_grp    │ engage_mode │ session_mode │
+├──────────────┼─────────────────┼──────────────┼─────────────┼──────────────┤
+│ mga-001      │ <span class="d-key">mg-feishu-proj</span> │ <span class="d-key">ag-xiaozhu</span>   │ mention     │ shared       │
+└──────────────┴─────────────────┴──────────────┴─────────────┴──────────────┘
+  ↑ 这行把 Agent 和频道连起来了，决定：@bot 才触发，同群共享 session</div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">3</div>
+      <div class="flow-body">
+        <h4>张三第一次 @小助：路由自动建表</h4>
+        <p>张三在群里 @小助 "帮我查天气"</p>
+        <div class="diagram" style="margin-top:0.5rem;">
+<pre><span class="d-label">① 权限模块解析张三身份 → 写入 users 表</span>
+┌──────────────────┬─────────┬──────────────┐
+│ id               │ kind    │ display_name │
+├──────────────────┼─────────┼──────────────┤
+│ <span class="d-key">feishu:ou_zhang</span>  │ feishu  │ 张三         │
+└──────────────────┴─────────┴──────────────┘
+
+<span class="d-label">② 张三是管理员 → 写入 user_roles 表</span>
+┌──────────────────┬─────────┬──────────────┐
+│ user_id          │ role    │ agent_group  │
+├──────────────────┼─────────┼──────────────┤
+│ feishu:ou_zhang  │ admin   │ null (全局)   │
+└──────────────────┴─────────┴──────────────┘
+
+<span class="d-label">③ resolveSession() → 没找到 → 创建新 session</span>
+┌──────────────┬──────────────┬─────────────────┬───────────┬─────────┐
+│ id           │ agent_group  │ messaging_group │ thread_id │ status  │
+├──────────────┼──────────────┼─────────────────┼───────────┼─────────┤
+│ <span class="d-key">sess-001</span>     │ ag-xiaozhu   │ mg-feishu-proj  │ null      │ active  │
+└──────────────┴──────────────┴─────────────────┴───────────┴─────────┘
+  ↑ session 的定位键：(ag-xiaozhu, mg-feishu-proj, null)
+  ↑ shared 模式下 thread_id 被忽略</div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">4</div>
+      <div class="flow-body">
+        <h4>李四也 @小助：复用同一个 Session</h4>
+        <p>李四在同一个群里 @小助 "那上海呢"</p>
+        <div class="diagram" style="margin-top:0.5rem;">
+<pre><span class="d-label">① 新增 users 表</span>
+┌──────────────────┬─────────┬──────────────┐
+│ id               │ kind    │ display_name │
+├──────────────────┼─────────┼──────────────┤
+│ feishu:ou_zhang  │ feishu  │ 张三         │
+│ <span class="d-key">feishu:ou_li</span>     │ feishu  │ 李四         │  ← 新增
+└──────────────────┴─────────┴──────────────┘
+
+<span class="d-label">② resolveSession() → 找到已有 session</span>
+  因为 (ag-xiaozhu, mg-feishu-proj, null) 已经存在 sess-001
+  → 复用！不创建新 session
+  → 李四的消息和张三的消息进入同一个 session
+
+<span class="d-label">sessions 表不变，还是一行：</span>
+┌──────────────┬──────────────┬─────────────────┬───────────┐
+│ sess-001     │ ag-xiaozhu   │ mg-feishu-proj  │ null      │
+└──────────────┴──────────────┴─────────────────┴───────────┘
+
+<span class="d-note">群聊所有人共享一个 session — 这就是 shared 模式的含义</span></div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">5</div>
+      <div class="flow-body">
+        <h4>张三私聊小助：新建独立 Session</h4>
+        <p>张三私聊小助 "帮我整理一下工作计划"</p>
+        <div class="diagram" style="margin-top:0.5rem;">
+<pre><span class="d-label">① 路由发现新频道 → 自动创建 messaging_group</span>
+┌─────────────────┬──────────────┬─────────────────┬──────────┐
+│ id              │ channel_type │ platform_id     │ is_group │
+├─────────────────┼──────────────┼─────────────────┼──────────┤
+│ mg-feishu-proj  │ feishu       │ oc_project_2026 │ 1        │
+│ <span class="d-key">mg-dm-zhang</span>     │ feishu       │ oc_dm_zhang     │ <span class="d-key">0</span>        │  ← 私聊
+└─────────────────┴──────────────┴─────────────────┴──────────┘
+  ↑ 私聊的 platform_id 是独立的 P2P chat_id
+
+<span class="d-label">② DM 也需要接线（管理员之前配过或自动配）</span>
+┌──────────────┬─────────────────┬──────────────┬─────────────┐
+│ id           │ messaging_group │ agent_group  │ engage_mode │
+├──────────────┼─────────────────┼──────────────┼─────────────┤
+│ mga-001      │ mg-feishu-proj  │ ag-xiaozhu   │ mention     │
+│ <span class="d-key">mga-002</span>      │ mg-dm-zhang    │ ag-xiaozhu   │ <span class="d-key">pattern .</span>  │  ← 私聊永远响应
+└──────────────┴─────────────────┴──────────────┴─────────────┘
+
+<span class="d-label">③ resolveSession() → 新 session</span>
+  (ag-xiaozhu, mg-dm-zhang, null) 不存在 → 创建新的
+┌──────────────┬──────────────┬─────────────────┬───────────┐
+│ sess-001     │ ag-xiaozhu   │ mg-feishu-proj  │ null      │  群聊
+│ <span class="d-key">sess-002</span>     │ ag-xiaozhu   │ mg-dm-zhang     │ null      │  私聊
+└──────────────┴──────────────┴─────────────────┴───────────┘
+  ↑ 两个 session 完全隔离，上下文互不影响
+
+<span class="d-label">④ 记录张三的 DM 缓存</span>
+┌──────────────────┬──────────────┬─────────────────┐
+│ user_id          │ channel_type │ messaging_group │
+├──────────────────┼──────────────┼─────────────────┤
+│ feishu:ou_zhang  │ feishu       │ mg-dm-zhang     │
+└──────────────────┴──────────────┴─────────────────┘
+  ← 下次 Host 要给张三发 DM，不用再去平台查 chat_id</div>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">6</div>
+      <div class="flow-body">
+        <h4>陌生人王五 @小助：触发审批流程</h4>
+        <p>王五不在 known member 里，触发了 <code>sender_scope='known'</code> 检查</p>
+        <div class="diagram" style="margin-top:0.5rem;">
+<pre><span class="d-label">① 解析王五身份</span>
+┌──────────────────┬─────────┬──────────────┐
+│ feishu:ou_wang   │ feishu  │ 王五         │  ← 新增
+└──────────────────┴─────────┴──────────────┘
+
+<span class="d-label">② sender_scope 检查失败 → 写入审批表</span>
+┌─────────────────┬─────────────────┬──────────────┬─────────────────┐
+│ id              │ messaging_group │ agent_group  │ sender_identity │
+├─────────────────┼─────────────────┼──────────────┼─────────────────┤
+│ <span class="d-key">psa-001</span>         │ mg-feishu-proj  │ ag-xiaozhu   │ feishu:ou_wang  │
+└─────────────────┴─────────────────┴──────────────┴─────────────────┘
+  → 发审批卡片给管理员（张三），张三点击"允许"后：
+    · 写入 agent_group_members 表
+    · 王五的消息重新走路由流程
+
+<span class="d-label">③ 如果管理员点"拒绝" → 消息丢弃</span>
+┌──────────────┬─────────────────┬──────────────┬────────────────────────┐
+│ channel_type │ platform_id     │ user_id      │ reason                 │
+├──────────────┼─────────────────┼──────────────┼────────────────────────┤
+│ feishu       │ oc_project_2026 │ feishu:ou_wang│ access_gate_denied     │
+└──────────────┴─────────────────┴──────────────┴────────────────────────┘
+  ← dropped_messages 表记录审计</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- === Summary Diagram === -->
+  <h3 style="margin-top:2.5rem; margin-bottom:1rem;">核心关系一图总结</h3>
+  <div class="diagram">
+<pre>
+  <span class="d-box">agent_groups</span>  ─────────────────────────────────────────────────────────┐
+       │                                                                   │
+       │  1:N                                                              │  1:N
+       ▼                                                                   ▼
+  <span class="d-box">messaging_group_agents</span>   (多对多接线)           <span class="d-box">sessions</span>
+       │        │                                           │        │
+       │ N:1    │ N:1                                       │ N:1    │ N:1
+       ▼        ▼                                           ▼        ▼
+  <span class="d-box">messaging_groups</span>                                   <span class="d-box">agent_groups</span>  (回指)
+       │                                                   <span class="d-box">messaging_groups</span> (回指)
+       │ 1:N
+       ▼
+  <span class="d-box">user_dms</span>  ──→  <span class="d-box">users</span>  ──→  <span class="d-box">user_roles</span>
+                           └──→  <span class="d-box">agent_group_members</span>
+
+  <span class="d-note">审批表都弱关联到 messaging_groups + agent_groups</span>
+  <span class="d-note">dropped_messages 是审计表，弱关联，无 FK</span>
+</pre>
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">核心关联路径</div>
+    <p>一条消息到达后，nanoclaw.db 的查询路径：<code>(channel_type, platform_id)</code> → <code>messaging_groups</code> → <code>messaging_group_agents</code>（找接线）→ <code>agent_groups</code>（找 Agent）→ <code>sessions</code>（找/建会话）。权限侧走 <code>users</code> → <code>user_roles</code> / <code>agent_group_members</code>。审批侧根据场景写入对应的 pending 表。</p>
+  </div>
+</section>
+
+<!-- ===== 8. Lifecycle ===== -->
+<section class="section" id="lifecycle">
+  <div class="section-num">08 / 消息生命周期</div>
+  <h2 class="section-title">一条消息的完整旅程</h2>
+
+  <p>以用户在飞书群说"帮我查天气"为例，完整追踪数据在每个表之间的流转：</p>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-num">&#9312;</div>
+      <div class="flow-body">
+        <h4>Host &rarr; inbound.db / messages_in</h4>
+        <p>用户消息写入，status=pending，trigger=1（唤醒 agent）</p>
+        <div class="flow-code">id=om_001:ag-1 | seq=2 | content='{"text":"帮我查天气"}'</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">&#9313;</div>
+      <div class="flow-body">
+        <h4>Host &rarr; inbound.db / session_routing</h4>
+        <p>告诉 Container 回复往哪发</p>
+        <div class="flow-code">channel_type=feishu | platform_id=oc_group_abc</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">&#9314;</div>
+      <div class="flow-body">
+        <h4>Container 读 messages_in &rarr; 写 outbound.db / processing_ack</h4>
+        <p>标记正在处理，避免重复消费</p>
+        <div class="flow-code">message_id=om_001:ag-1 | status=processing</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">&#9315;</div>
+      <div class="flow-body">
+        <h4>Container &rarr; outbound.db / session_state</h4>
+        <p>SDK 返回 session_id，立即持久化（防崩溃丢失）</p>
+        <div class="flow-code">key=continuation:claude | value=abc-123-def</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">&#9316;</div>
+      <div class="flow-body">
+        <h4>Container &rarr; outbound.db / messages_out</h4>
+        <p>Agent 回复写入</p>
+        <div class="flow-code">id=out-001 | seq=1 | content='{"text":"北京晴，22°C"}'</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">&#9317;</div>
+      <div class="flow-body">
+        <h4>Container &rarr; outbound.db / processing_ack</h4>
+        <p>更新状态为 completed</p>
+        <div class="flow-code">message_id=om_001:ag-1 | status=completed</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">&#9318;</div>
+      <div class="flow-body">
+        <h4>Host 读 messages_out &rarr; 通过 Adapter 投递</h4>
+        <p>Delivery poll 读到新回复，调 Feishu adapter 发送</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">&#9319;</div>
+      <div class="flow-body">
+        <h4>Host &rarr; inbound.db / delivered</h4>
+        <p>记录已投递，防止重复发送</p>
+        <div class="flow-code">message_out_id=out-001 | status=delivered</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">&#9320;</div>
+      <div class="flow-body">
+        <h4>Host 同步 processing_ack &rarr; inbound.db / messages_in</h4>
+        <p>将 Container 的 completed 状态同步回来</p>
+        <div class="flow-code">id=om_001:ag-1 | status=completed</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 8. SDK Continuity ===== -->
+<section class="section" id="sdk-continuity">
+  <div class="section-num">09 / SDK 会话续接</div>
+  <h2 class="section-title">DB 与 Claude SDK 的联系</h2>
+
+  <p>inbound.db / outbound.db 和 Claude SDK 的对话上下文是<strong>完全解耦</strong>的两层。唯一联系点是 outbound.db 里的一个 key：</p>
+
+  <div class="diagram">
+<pre>
+<span class="d-box">outbound.db / session_state 表</span>
+
+  key = "continuation:claude"    value = "abc-123-def"
+            │
+            │  唯一的桥梁
+            │
+   ┌────────┴────────┐
+   │                  │
+   ▼                  ▼
+<span class="d-label">DB 层              SDK 层</span>
+消息管道            对话续接
+传输 &amp; 记录        语义 &amp; 上下文
+   │                  │
+   │  互相不知道       │  SDK 自己管理
+   │  对方的内容       │  .jsonl transcript
+   │                  │
+   └──── poll loop ───┘
+       读 DB → 推给 SDK
+       SDK 返回 ID → 存回 DB
+</pre>
+  </div>
+
+  <h3 style="margin-top:2rem; margin-bottom:1rem;">续接流程</h3>
+
+  <div class="tabs" id="sdk-tabs">
+    <button class="tab-btn active" onclick="switchTab('sdk-tabs','sdk-cold')">冷启动</button>
+    <button class="tab-btn" onclick="switchTab('sdk-tabs','sdk-warm')">续接对话</button>
+    <button class="tab-btn" onclick="switchTab('sdk-tabs','sdk-crash')">Container 重启</button>
+    <button class="tab-btn" onclick="switchTab('sdk-tabs','sdk-clear')">/clear 重置</button>
+  </div>
+
+  <div class="tab-content active" id="sdk-cold">
+    <p>第一次消息到达，<code>continuation = undefined</code></p>
+    <div class="flow-code">sdkQuery({ prompt, options: { resume: undefined } })  →  全新对话</div>
+    <p>SDK 创建新 session，返回 session_id</p>
+    <div class="flow-code">init 事件 → setContinuation("claude", "abc-123")</div>
+    <p>session_id 立即写入 outbound.db，容器崩溃也不丢</p>
+  </div>
+
+  <div class="tab-content" id="sdk-warm">
+    <p>同 session 内后续消息到达</p>
+    <div class="flow-code">continuation = "abc-123"  (从 session_state 读取)</div>
+    <div class="flow-code">sdkQuery({ prompt, options: { resume: "abc-123" } })</div>
+    <p>SDK 找到 .jsonl transcript，恢复之前的对话上下文，Claude "记得"之前聊过什么</p>
+  </div>
+
+  <div class="tab-content" id="sdk-crash">
+    <p>容器销毁后重建</p>
+    <p>outbound.db 在宿主机持久目录，不在容器内部，所以：</p>
+    <ol style="padding-left:1.5rem; color:var(--text2);">
+      <li>新容器挂载同一个 session 目录</li>
+      <li>从 outbound.db 读出 <code>continuation:claude = abc-123</code></li>
+      <li>SDK 用 <code>resume: "abc-123"</code> 恢复对话</li>
+      <li>Claude 记得之前的所有上下文</li>
+    </ol>
+  </div>
+
+  <div class="tab-content" id="sdk-clear">
+    <p>用户发送 <code>/clear</code> 命令</p>
+    <div class="flow-code">continuation = undefined</div>
+    <div class="flow-code">clearContinuation("claude")  →  删除 session_state 里的 key</div>
+    <p>下次消息到达时 SDK 不传 resume → 全新对话。但 inbound.db / outbound.db 的历史消息还在，只是 Claude 看不到了。</p>
+  </div>
+</section>
+
+<!-- ===== 9. Compact ===== -->
+<section class="section" id="compact">
+  <div class="section-num">10 / 上下文压缩</div>
+  <h2 class="section-title">上下文快满了怎么办</h2>
+
+  <p>NanoClaw 用了<strong>两层机制</strong>确保长对话不丢失信息：</p>
+
+  <div class="diagram">
+<pre>
+  上下文接近 <span class="d-key">165,000 tokens</span>
+       │
+       ▼
+  <span class="d-box">PreCompact Hook 触发</span>
+       │
+       ├─ 读取 .jsonl transcript（完整对话记录）
+       ├─ 解析成 user / assistant 消息对
+       └─ 写成 Markdown 保存到 /workspace/agent/conversations/
+          例如: 2026-04-29-weather-query.md
+       │
+       ▼
+  <span class="d-box">SDK 执行 Compact</span>
+       │
+       ├─ 历史消息压缩成摘要
+       ├─ 保留最近的消息不变
+       └─ 上下文窗口腾出空间
+       │
+       ▼
+  <span class="d-box">后续对话继续</span>
+  Claude 可以通过 conversations/ 目录回顾之前的对话
+</pre>
+  </div>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-icon">&#128230;</div>
+      <h3>归档文件</h3>
+      <p>Compact 前完整对话存到 <code>conversations/</code>，Markdown 格式，可搜索</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#128260;</div>
+      <h3>自动压缩</h3>
+      <p>SDK 在 165k tokens 时自动触发，用户无感知</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#128269;</div>
+      <h3>可追溯</h3>
+      <p>Agent 后续可以读 conversations/ 找回被压缩的细节</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 10. Files ===== -->
+<section class="section" id="files">
+  <div class="section-num">11 / 文件访问与安全</div>
+  <h2 class="section-title">Agent 能访问你的文件吗</h2>
+
+  <p>Agent 运行在 Docker 容器里，通过 volume mount 访问宿主机文件。<strong>默认只能操作自己的工作区。</strong></p>
+
+  <h3 style="margin-top:1.5rem; margin-bottom:1rem;">默认挂载</h3>
+  <table class="styled-table">
+    <thead>
+      <tr><th>容器路径</th><th>宿主机路径</th><th>权限</th><th>用途</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>/workspace/agent/</code></td><td><code>groups/{name}/</code></td><td><span class="badge badge-green">读写</span></td><td>工作目录 + 记忆</td></tr>
+      <tr><td><code>/workspace/</code></td><td><code>data/v2-sessions/.../</code></td><td><span class="badge badge-green">读写</span></td><td>Session DB</td></tr>
+      <tr><td><code>/workspace/global/</code></td><td><code>groups/global/</code></td><td><span class="badge badge-blue">只读</span></td><td>跨 group 共享</td></tr>
+      <tr><td><code>/home/node/.claude/</code></td><td>session .claude-shared/</td><td><span class="badge badge-green">读写</span></td><td>SDK 状态</td></tr>
+      <tr><td><code>/app/CLAUDE.md</code></td><td>container/CLAUDE.md</td><td><span class="badge badge-blue">只读</span></td><td>共享指令</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout danger">
+    <div class="callout-title">默认看不到桌面、Home 目录等</div>
+    <p>这是安全设计。要访问额外目录，需要白名单 + container.json 配置双重授权。Agent 无法自己突破限制。</p>
+  </div>
+
+  <h3 style="margin-top:1.5rem; margin-bottom:1rem;">如何授权额外目录</h3>
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-num">1</div>
+      <div class="flow-body">
+        <h4>创建白名单</h4>
+        <p><code>~/.config/nanoclaw/mount-allowlist.json</code></p>
+        <div class="flow-code">{ "allowedRoots": ["/Users/xxx/Desktop"], "blockedPatterns": [] }</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">2</div>
+      <div class="flow-body">
+        <h4>配置 container.json</h4>
+        <p>Agent group 目录下的 <code>container.json</code></p>
+        <div class="flow-code">{ "additionalMounts": [{ "hostPath": "/Users/xxx/Desktop", "containerPath": "/workspace/desktop" }] }</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">3</div>
+      <div class="flow-body">
+        <h4>Agent 即可访问</h4>
+        <p>容器内 <code>/workspace/desktop/</code> 就是你的桌面目录</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 11. Feishu ===== -->
+<section class="section" id="feishu">
+  <div class="section-num">12 / 飞书频道</div>
+  <h2 class="section-title">飞书适配器实现</h2>
+
+  <p>飞书频道是本地自定义开发的适配器，使用 <strong>WebSocket 长连接模式</strong>，不需要公网 URL。</p>
+
+  <div class="diagram">
+<pre>
+<span class="d-label">飞书消息处理流程</span>
+
+  用户在飞书群/私聊发消息
+       │
+       ▼
+  @larksuiteoapi/node-sdk  WSClient 接收事件
+       │
+       ▼
+  EventDispatcher 注册 'im.message.receive_v1' 回调
+       │
+       ▼
+  handleMessage(data)
+       ├─ 过滤 bot 自己的消息（sender_type === 'app'）
+       ├─ 事件去重（eventId + 60s 过期 Set）
+       ├─ 解析内容（text/post/image/file/audio/sticker/...）
+       ├─ @bot 检测（mentions[].id.open_id === botOpenId）
+       ├─ 设置 isMention 标记
+       └─ 调用 setupConfig.onInbound(platformId=chatId, ...)
+
+<span class="d-label">────────────────────────────────────────</span>
+
+<span class="d-label">飞书回复处理流程</span>
+
+  Host delivery poll 读到 messages_out
+       │
+       ▼
+  adapter.deliver(platformId, threadId, message)
+       ├─ 提取文本 → 分割（>4000 字符分多条）
+       ├─ 构建 Card JSON（schema 2.0 + markdown）
+       ├─ 如果有 typing 占位消息 → patch 更新
+       ├─ 否则 → client.im.message.create 发新消息
+       └─ 附件文件 → upload + file_key → 发送文件消息
+</pre>
+  </div>
+
+  <h3 style="margin-top:1.5rem; margin-bottom:1rem;">Typing 指示器</h3>
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-icon">&#9203;</div>
+      <h3>setTyping</h3>
+      <p>回复上一条消息，发送"&#9203; 思考中..."卡片，记录占位消息 ID</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#9998;</div>
+      <h3>deliver 更新</h3>
+      <p>Agent 回复时，先 patch 更新 typing 占位卡片为实际内容，剩余分片发新消息</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 13. Skills & MCP ===== -->
+<section class="section" id="skills">
+  <div class="section-num">13 / Skill 与 MCP 配置</div>
+  <h2 class="section-title">频道加载、Skill 体系与 MCP 扩展</h2>
+
+  <!-- === Channel Loading === -->
+  <h3 style="margin-bottom:1rem;">Channel 自注册机制</h3>
+
+  <p>NanoClaw 的 Channel 用<strong>自注册模式</strong>加载——import 即注册，不需要手动维护列表。</p>
+
+  <div class="diagram">
+<pre>
+<span class="d-label">src/index.ts</span>
+  │
+  └─ import './channels/index.js'     <span class="d-note">← 启动时 import 触发链</span>
+       │
+       ├─ import './cli.js'           <span class="d-note">← CLI channel 自注册</span>
+       │    registerChannelAdapter('cli', { factory: createCliAdapter })
+       │
+       ├─ import './feishu.js'        <span class="d-note">← 飞书 channel 自注册</span>
+       │    registerChannelAdapter('feishu', { factory: createAdapter })
+       │
+       ├─ import './telegram.js'      <span class="d-note">← 加了 Telegram 就多一行</span>
+       │    registerChannelAdapter('telegram', { ... })
+      ...
+       │
+       ▼
+  <span class="d-box">initChannelAdapters()</span>
+    遍历 registry → 调用每个 factory()
+    → 返回非 null 的 adapter → 调用 adapter.setup()
+    → 返回 null（没配凭证）→ 跳过
+</pre>
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">加一个新 Channel 就是两步</div>
+    <p>① 把 channel 模块文件放到 <code>src/channels/</code><br>② 在 <code>src/channels/index.ts</code> 加一行 <code>import './xxx.js'</code><br>如果该 channel 的环境变量没配（如 <code>FEISHU_APP_ID</code> 为空），factory 返回 <code>null</code>，该 channel 自动跳过，不会报错。</p>
+  </div>
+
+  <!-- === Four Skill Types === -->
+  <div class="divider"></div>
+  <h3 style="margin-bottom:1rem;">四种 Skill 体系</h3>
+
+  <p>NanoClaw 的所有扩展能力通过 <strong>Skill</strong> 组织，放在 <code>.claude/skills/</code> 目录下，共四种类型：</p>
+
+  <table class="styled-table">
+    <thead>
+      <tr><th>类型</th><th>用途</th><th>目录示例</th><th>触发方式</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="badge badge-green">Feature</span></td>
+        <td>加频道 / 加 MCP Server / 加能力</td>
+        <td><code>add-feishu/</code> <code>add-slack/</code> <code>add-atomic-chat-tool/</code></td>
+        <td><code>/add-feishu</code></td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-cyan">Container</span></td>
+        <td>容器内 Agent 的能力增强</td>
+        <td><code>container/skills/agent-browser/</code> <code>container/skills/frontend-engineer/</code></td>
+        <td><code>container.json</code> 的 <code>skills</code> 字段</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-orange">Utility</span></td>
+        <td>装命令行工具</td>
+        <td><code>claw/</code></td>
+        <td><code>/claw</code></td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-pink">Operational</span></td>
+        <td>运维 / 配置 / 排查</td>
+        <td><code>setup/</code> <code>debug/</code> <code>customize/</code></td>
+        <td><code>/setup</code> <code>/debug</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Feature Skill Detail -->
+  <h4 style="margin-top:1.5rem; margin-bottom:0.75rem;">Feature Skill 详解</h4>
+
+  <p>以飞书为例，一个 Feature Skill 的目录结构：</p>
+
+  <div class="diagram">
+<pre>
+<span class="d-label">.claude/skills/add-feishu/</span>
+  ├── SKILL.md              <span class="d-note">← 给 Claude Code 看的操作指南</span>
+  ├── manifest.yaml         <span class="d-note">← 机器可读的元数据</span>
+  ├── add/
+  │   └── src/channels/
+  │       ├── feishu.ts     <span class="d-note">← 新增文件</span>
+  │       └── feishu.test.ts
+  └── modify/
+      ├── src/channels/index.ts         <span class="d-note">← 要修改的文件</span>
+      └── src/channels/index.ts.intent.md <span class="d-note">← 修改意图说明</span>
+
+<span class="d-label">应用方式:</span>
+  npx tsx scripts/apply-skill.ts .claude/skills/add-feishu
+
+  脚本按 manifest:
+  ① 把 add/ 里的文件复制到项目树
+  ② 把 modify/ 里的文件按 intent 合并
+  ③ 安装 npm 依赖 (@larksuiteoapi/node-sdk)
+  ④ 记录到 .nanoclaw/state.yaml
+</pre>
+  </div>
+
+  <!-- Container Skill Detail -->
+  <h4 style="margin-top:1.5rem; margin-bottom:0.75rem;">Container Skill 详解</h4>
+
+  <div class="diagram">
+<pre>
+<span class="d-label">container/skills/</span>
+  ├── agent-browser/       <span class="d-note">← 网页浏览</span>
+  │   ├── SKILL.md         <span class="d-note">← YAML frontmatter + Agent 指令</span>
+  │   └── instructions.md  <span class="d-note">← 写入 CLAUDE.md 的 fragment</span>
+  ├── frontend-engineer/   <span class="d-note">← 前端工程</span>
+  ├── slack-formatting/    <span class="d-note">← Slack 格式化</span>
+  ├── vercel-cli/          <span class="d-note">← Vercel 部署</span>
+  ├── welcome/             <span class="d-note">← 欢迎引导</span>
+  └── self-customize/      <span class="d-note">← 自我定制</span>
+
+<span class="d-label">启用方式:</span>
+  container.json 里控制:
+  { "skills": "all" }              <span class="d-note">← 默认，全部启用</span>
+  { "skills": ["agent-browser"] }   <span class="d-note">← 只启用指定的</span>
+
+  Host spawn 时 syncSkillSymlinks() 创建符号链接
+  → Claude Code 自动加载 Skill 指令
+</pre>
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">用户怎么加自己的 Skill？</div>
+    <p>在 <code>.claude/skills/</code> 下创建目录，写一个 <code>SKILL.md</code>（YAML frontmatter 含 name + description，正文是操作步骤）。可选写 <code>manifest.yaml</code> 做确定性安装。然后在 Claude Code 里用 <code>/xxx</code> 触发执行。</p>
+  </div>
+
+  <!-- === MCP Configuration === -->
+  <div class="divider"></div>
+  <h3 style="margin-bottom:1rem;">MCP Server 三种配置方式</h3>
+
+  <div class="tabs" id="mcp-tabs">
+    <button class="tab-btn active" onclick="switchTab('mcp-tabs','mcp-runtime')">运行时动态</button>
+    <button class="tab-btn" onclick="switchTab('mcp-tabs','mcp-manual')">手动配置</button>
+    <button class="tab-btn" onclick="switchTab('mcp-tabs','mcp-skill')">Skill 硬编码</button>
+  </div>
+
+  <div class="tab-content active" id="mcp-runtime">
+    <p><strong>Agent 自己申请，管理员审批后生效。</strong></p>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">1</div>
+        <div class="flow-body">
+          <h4>Agent 调用 add_mcp_server 工具</h4>
+          <div class="flow-code">mcp__nanoclaw__add_mcp_server({ name: "puppeteer", command: "npx", args: ["-y", "@modelcontextprotocol/server-puppeteer"] })</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">2</div>
+        <div class="flow-body">
+          <h4>写入 messages_out（kind=system, action=add_mcp_server）</h4>
+          <p>Host 的 self-mod 模块收到请求</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">3</div>
+        <div class="flow-body">
+          <h4>发审批卡片给管理员</h4>
+          <div class="flow-code">"MCP Server 请求: puppeteer — [Approve] [Reject]"</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">4</div>
+        <div class="flow-body">
+          <h4>管理员点 Approve → 更新 container.json + 杀容器</h4>
+          <div class="flow-code">groups/main/container.json 新增 mcpServers.puppeteer 条目</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">5</div>
+        <div class="flow-body">
+          <h4>下次唤醒 → 新容器加载新 MCP Server</h4>
+          <p>Agent 可以使用 <code>mcp__puppeteer__*</code> 工具</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="mcp-manual">
+    <p><strong>直接编辑 container.json，最简单直接。</strong></p>
+    <p>文件位置：<code>groups/&lt;folder&gt;/container.json</code></p>
+    <div class="diagram">
+<pre>
+<span class="d-label">container.json 完整示例</span>
+{
+  <span class="d-key">"mcpServers"</span>: {
+    "puppeteer": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+      "env": {},
+      <span class="d-key">"instructions"</span>: "Use Puppeteer to browse web pages and take screenshots."
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace/agent"],
+      "env": {}
+    }
+  },
+  <span class="d-key">"packages"</span>: { "apt": [], "npm": [] },
+  <span class="d-key">"additionalMounts"</span>: [],
+  <span class="d-key">"skills"</span>: "all"
+}
+
+<span class="d-note">instructions 字段会被写入 .claude-fragments/mcp-&lt;name&gt;.md</span>
+<span class="d-note">成为 Agent 系统提示的一部分，告诉 Agent 怎么用这个 MCP</span>
+<span class="d-note">修改后需要重启容器（/debug 或等下次 wake）才能生效</span>
+</pre>
+  </div>
+  </div>
+
+  <div class="tab-content" id="mcp-skill">
+    <p><strong>Feature Skill 把 MCP Server 编译进 agent-runner 源码。</strong></p>
+    <p>像 <code>add-atomic-chat-tool</code> 这种 skill：</p>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">1</div>
+        <div class="flow-body">
+          <h4>Skill 把 MCP server 源码放进 agent-runner 树</h4>
+          <div class="flow-code">container/agent-runner/src/atomic-chat-mcp-stdio.ts</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">2</div>
+        <div class="flow-body">
+          <h4>在 index.ts 里注册到 mcpServers 对象</h4>
+          <div class="flow-code">mcpServers['atomic-chat'] = { command: 'bun', args: ['run', ...] }</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">3</div>
+        <div class="flow-body">
+          <h4>在 claude.ts 的 TOOL_ALLOWLIST 加工具 glob</h4>
+          <div class="flow-code">'mcp__atomic_chat__*'</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">4</div>
+        <div class="flow-body">
+          <h4>需要重新 build Docker 镜像才能生效</h4>
+          <div class="flow-code">./container/build.sh</div>
+        </div>
+      </div>
+    </div>
+    <p style="margin-top:1rem; color:var(--text2);">这种方式 MCP Server 是编译进 agent-runner 的，不走 container.json。适合需要深度集成的场景。</p>
+  </div>
+
+  <!-- === Full Chain Diagram === -->
+  <div class="divider"></div>
+  <h3 style="margin-bottom:1rem;">MCP 配置完整链路</h3>
+
+  <div class="diagram">
+<pre>
+<span class="d-note">══════════════════════════════════════════════════════════════</span>
+<span class="d-note">                    MCP 从配置到生效的完整路径                    </span>
+<span class="d-note">══════════════════════════════════════════════════════════════</span>
+
+<span class="d-label">配置入口</span>
+  方式一: Agent 调 add_mcp_server → 审批 → container.json
+  方式二: 手动编辑 groups/main/container.json
+  方式三: Feature Skill 编译进 agent-runner 源码
+
+           │
+           │  container.json 最终样子:
+           │  { "mcpServers": { "puppeteer": { command, args, env, instructions } },
+           │    "skills": ["agent-browser", "frontend-engineer"], ... }
+           │
+     spawn 时读取
+           │
+           ▼
+<span class="d-label">Host 处理</span>
+  ① syncSkillSymlinks()     → 按 skills 字段建符号链接
+  ② composeGroupClaudeMd()  → 写 MCP instructions 片段到 .claude-fragments/
+  ③ buildMounts()            → 挂载 container.json (RO) 到容器
+           │
+     容器启动
+           │
+           ▼
+<span class="d-label">Container 内</span>
+  loadConfig() → 读 /workspace/agent/container.json
+
+  mcpServers = {
+    <span class="d-key">nanoclaw</span>:   { command: 'bun', args: ['run', ...] },    <span class="d-note">← 内置，永远有</span>
+    <span class="d-key">puppeteer</span>: { command: 'npx', args: [...] },          <span class="d-note">← 从 container.json 合并</span>
+  }
+
+  createProvider('claude', { mcpServers })
+       │
+       ▼
+  ClaudeProvider.query() → sdkQuery({ mcpServers })
+       │
+       ▼
+  SDK 为每个 MCP server 启动 stdio 子进程
+  Agent 可用: <span class="d-key">mcp__nanoclaw__*</span> + <span class="d-key">mcp__puppeteer__*</span>
+</pre>
+  </div>
+
+  <!-- === Credential Injection === -->
+  <div class="divider"></div>
+  <h3 style="margin-bottom:1rem;">容器凭证注入</h3>
+
+  <p>容器里的 SDK 需要 API Key 才能调 Anthropic API，但容器<strong>永远不应该看到真实 Key</strong>。NanoClaw 提供两套方案：</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-icon">&#128274;</div>
+      <h3>OneCLI Gateway（推荐）</h3>
+      <p>容器设置 <code>HTTPS_PROXY</code> 指向宿主机 OneCLI 代理。所有 API 请求被代理拦截，OneCLI 从加密 Vault 注入真实 Key。容器内<strong>零凭证</strong>。</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#128272;</div>
+      <h3>Credential Proxy（轻量替代）</h3>
+      <p>NanoClaw 内置的 HTTP 代理。容器设 <code>ANTHROPIC_BASE_URL</code> 指向代理，<code>ANTHROPIC_AUTH_TOKEN=placeholder</code>。代理在请求发出前把 placeholder 替换为真实 Key。</p>
+    </div>
+  </div>
+
+  <div class="diagram" style="margin-top:1rem;">
+<pre>
+<span class="d-label">OneCLI 模式</span>
+  Container                         Host
+  Claude SDK                        OneCLI Gateway
+    │                                  │
+    │  HTTPS_PROXY ──────────────────► │
+    │  (所有出站请求走代理)              │  从 Vault 取 Key
+    │                                  │  注入 x-api-key header
+    │                                  │  转发到 api.anthropic.com
+    │                                  │
+    │  ←─── 代理返回 API 响应 ──────── │
+    │                                  │
+  <span class="d-note">容器里完全没有 API Key，只有代理地址</span>
+
+<span class="d-label">──────────────────────────────────────────────</span>
+
+<span class="d-label">Credential Proxy 模式</span>
+  Container                         Host
+  Claude SDK                        Credential Proxy (127.0.0.1)
+    │                                  │
+    │  ANTHROPIC_BASE_URL = proxy ──► │
+    │  ANTHROPIC_AUTH_TOKEN = "placeholder"
+    │                                  │  删除 placeholder
+    │                                  │  注入真实 Bearer token
+    │                                  │  转发到 api.anthropic.com
+    │                                  │
+  <span class="d-note">容器里有个假的 "placeholder"，但不影响安全</span>
+</pre>
+  </div>
+
+  <table class="styled-table" style="margin-top:1rem;">
+    <thead>
+      <tr><th></th><th>OneCLI Gateway</th><th>Credential Proxy</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>密钥存储</strong></td><td>加密 Vault</td><td><code>.env</code> 文件明文</td></tr>
+      <tr><td><strong>容器里有 Key 吗</strong></td><td>完全没有</td><td>有个 <code>placeholder</code></td></tr>
+      <tr><td><strong>人工审批</strong></td><td>支持（管理员点按钮放行）</td><td>不支持</td></tr>
+      <tr><td><strong>密钥轮换</strong></td><td>支持</td><td>不支持</td></tr>
+      <tr><td><strong>安装成本</strong></td><td>需装 Gateway + CLI</td><td>只需 <code>.env</code></td></tr>
+      <tr><td><strong>适合场景</strong></td><td>生产 / 多人</td><td>个人开发 / 快速上手</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ===== 14. OneCLI ===== -->
+<section class="section" id="onecli">
+  <div class="section-num">14 / OneCLI 凭证网关</div>
+  <h2 class="section-title">OneCLI 如何把 Key 注入容器</h2>
+
+  <p>上一节提到容器永远看不到真实 API Key。OneCLI 是 NanoClaw 的<strong>默认凭证方案</strong>，通过 HTTPS MITM 代理在请求发出时动态注入密钥。整个过程中，真实密钥只存在 OneCLI Gateway 的加密 Vault 里。</p>
+
+  <!-- === Three Roles === -->
+  <h3 style="margin-bottom:1rem;">三个角色</h3>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-icon">&#128274;</div>
+      <h3>OneCLI Gateway</h3>
+      <p>服务端，跑在 Docker 容器里。<code>:10254</code> 是管理面板，<code>:10255</code> 是 MITM 代理网关。内含 Secrets 密钥库、Agents 注册表、策略 Rules。</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#128187;</div>
+      <h3>onecli CLI</h3>
+      <p>管理客户端，装在 <code>~/.local/bin/onecli</code>。用来创建/查看 secrets、agents、rules。<strong>不影响容器运行</strong>，容器里没有这个二进制。</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#128051;</div>
+      <h3>容器内 env</h3>
+      <p>被代理方。只知道代理地址 + <code>placeholder</code> token。所有 HTTPS 流量自动走代理，不知道真实密钥。</p>
+    </div>
+  </div>
+
+  <!-- === Architecture Diagram === -->
+  <div class="divider"></div>
+  <h3 style="margin-bottom:1rem;">架构全景</h3>
+
+  <div class="diagram">
+<pre>
+<span class="d-note">             OneCLI 凭证注入架构</span>
+<span class="d-note">══════════════════════════════════════════════════════════════</span>
+
+<span class="d-label">本机 (macOS / Linux)</span>
+
+  onecli CLI                    OneCLI Gateway (Docker)
+  ~/.local/bin/onecli           :10254 管理面板 / API
+       │                        :10255 代理网关
+       │  REST API              ┌──────────────────────┐
+       └───────────────────────►│  Secrets 密钥库       │
+                                │  Agents 注册表        │
+  NanoClaw Host                 │  Rules 策略规则       │
+       │                        │       │               │
+       │  SDK: ensureAgent      │       ▼               │
+       │  SDK: applyConfig ────►│  MITM Proxy          │
+       │                        │  TLS 解密 → 改写 → 重加密 │
+       │                        └──────────┬───────────┘
+       │                                   │
+       │ docker run + env                  │
+       ▼                                   │
+  <span class="d-box"> ┌─────────────────────────────────┐ </span>
+  <span class="d-box"> │  Agent Container                │ </span>
+  <span class="d-box"> │                                 │ </span>
+  <span class="d-box"> │  HTTPS_PROXY = ...:10255 ───────┼──┘</span>
+  <span class="d-box"> │  SSL_CERT_FILE = CA 证书         │ </span>
+  <span class="d-box"> │  ANTHROPIC_BASE_URL = 智谱 URL   │ </span>
+  <span class="d-box"> │  ANTHROPIC_AUTH_TOKEN = placeholder │ </span>
+  <span class="d-box"> │                                 │ </span>
+  <span class="d-box"> │  Claude SDK ── HTTPS 请求 ──► Proxy ──► 目标 API │ </span>
+  <span class="d-box"> └─────────────────────────────────┘ </span>
+</pre>
+  </div>
+
+  <!-- === Proxy Behavior === -->
+  <div class="divider"></div>
+  <h3 style="margin-bottom:1rem;">代理行为：所有 HTTPS 流量都走代理</h3>
+
+  <p>容器的 <code>HTTPS_PROXY</code> 是全局设置，意味着<strong>所有</strong> HTTPS 请求都会经过 Gateway。但代理行为取决于是否有匹配的 secret：</p>
+
+  <table class="styled-table">
+    <thead>
+      <tr><th>请求目标</th><th>代理行为</th><th>举例</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="badge badge-green">匹配 secret</span></td>
+        <td>拦截 → 替换/注入认证 header → 转发</td>
+        <td><code>open.bigmodel.cn</code> → 注入 <code>Authorization: Bearer &lt;real-key&gt;</code></td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-cyan">无匹配</span></td>
+        <td>直接透传，不做任何修改</td>
+        <td><code>github.com</code>、<code>npmjs.org</code> 等</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-red">被 rule 拦截</span></td>
+        <td>阻止或限速</td>
+        <td><code>block</code> / <code>rate_limit</code> 规则</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <div class="callout-title">安全边界</div>
+    <p>代理只改写 HTTP header，不修改请求体或响应体。对于没有匹配 secret 的请求，Gateway 是纯粹的透明代理——不读、不改、不记录。</p>
+  </div>
+
+  <!-- === Full Flow === -->
+  <div class="divider"></div>
+  <h3 style="margin-bottom:1rem;">完整流程（智谱 API 场景）</h3>
+
+  <div class="diagram">
+<pre>
+<span class="d-label">1. Host 启动容器时</span>
+  container-runner.ts:
+    ① onecli.ensureAgent({ name, identifier })     <span class="d-note">← 确保 agent 注册到 Vault</span>
+    ② onecli.applyContainerConfig(args)             <span class="d-note">← 注入 HTTPS_PROXY + CA 证书</span>
+    ③ providers/claude.ts 检测 .env:                <span class="d-note">← 注入 base URL + placeholder</span>
+       ANTHROPIC_BASE_URL  = https://open.bigmodel.cn/api/anthropic
+       ANTHROPIC_AUTH_TOKEN = placeholder
+
+<span class="d-label">2. 容器内 Claude SDK 发请求</span>
+  POST https://open.bigmodel.cn/api/anthropic/v1/messages
+  Authorization: Bearer placeholder                 <span class="d-note">← 假 token</span>
+
+  ┌────────────────────────────────────────────────────────┐
+  │  因为 HTTPS_PROXY 设置，请求先到 OneCLI Gateway :10255  │
+  └────────────────────────────────────────────────────────┘
+
+<span class="d-label">3. Gateway 做 MITM</span>
+  ① 用 CA 证书解密 TLS                                <span class="d-note">← 容器信任这个 CA (SSL_CERT_FILE)</span>
+  ② 读取 Host header: open.bigmodel.cn
+  ③ 匹配 secret "Zhipu API Key"                       <span class="d-note">← host_pattern 匹配</span>
+  ④ 替换 Authorization: Bearer dc3c4c...1DBM           <span class="d-note">← 真实 key 替换 placeholder</span>
+  ⑤ 重新加密 TLS，转发到真实 open.bigmodel.cn
+
+<span class="d-label">4. 响应回传</span>
+  open.bigmodel.cn → Gateway → 容器                    <span class="d-note">← 透传，不做修改</span>
+  SDK 解析响应 → 写入 outbound.db
+  Host delivery poll → 飞书 adapter → 用户收到回复 &#127881;
+</pre>
+  </div>
+
+  <!-- === Env Vars === -->
+  <div class="divider"></div>
+  <h3 style="margin-bottom:1rem;">容器内关键环境变量</h3>
+
+  <table class="styled-table">
+    <thead>
+      <tr><th>环境变量</th><th>来源</th><th>作用</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>HTTPS_PROXY</code></td>
+        <td>OneCLI SDK <code>applyContainerConfig</code></td>
+        <td>所有 HTTPS 请求走代理 (<code>host.docker.internal:10255</code>)</td>
+      </tr>
+      <tr>
+        <td><code>SSL_CERT_FILE</code></td>
+        <td>OneCLI SDK</td>
+        <td>信任 Gateway CA，否则 MITM TLS 验证失败</td>
+      </tr>
+      <tr>
+        <td><code>NODE_EXTRA_CA_CERTS</code></td>
+        <td>OneCLI SDK</td>
+        <td>Node.js 额外信任的 CA 证书</td>
+      </tr>
+      <tr>
+        <td><code>NODE_USE_ENV_PROXY</code></td>
+        <td>OneCLI SDK</td>
+        <td>让 Node.js 读取 HTTPS_PROXY 环境变量</td>
+      </tr>
+      <tr>
+        <td><code>ANTHROPIC_BASE_URL</code></td>
+        <td><code>src/providers/claude.ts</code> 读 .env</td>
+        <td>SDK 请求发到智谱而非 api.anthropic.com</td>
+      </tr>
+      <tr>
+        <td><code>ANTHROPIC_AUTH_TOKEN</code></td>
+        <td><code>src/providers/claude.ts</code></td>
+        <td>值为 <code>placeholder</code>，代理替换为真实 key</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- === Secret Types === -->
+  <div class="divider"></div>
+  <h3 style="margin-bottom:1rem;">Secret 类型与注入方式</h3>
+
+  <table class="styled-table">
+    <thead>
+      <tr><th>Secret 类型</th><th>注入方式</th><th>适用场景</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>anthropic</code></td>
+        <td>注入 <code>x-api-key</code> header</td>
+        <td>Anthropic 官方 API (<code>api.anthropic.com</code>)</td>
+      </tr>
+      <tr>
+        <td><code>generic</code></td>
+        <td>自定义 header + value 模板</td>
+        <td>智谱、OpenRouter 等兼容 API，OAuth token</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <div class="callout-title">智谱 API 配置要点</div>
+    <p>智谱等兼容 API 使用 <code>generic</code> 类型 secret：</p>
+    <p>① <strong>host pattern</strong> = <code>open.bigmodel.cn</code></p>
+    <p>② <strong>header name</strong> = <code>Authorization</code></p>
+    <p>③ <strong>value format</strong> = <code>Bearer {value}</code></p>
+    <p>④ <strong>.env</strong> 里设置 <code>ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic</code></p>
+    <p>Gateway 匹配到请求后，将 <code>Authorization: Bearer placeholder</code> 替换为 <code>Authorization: Bearer &lt;真实 key&gt;</code>。</p>
+  </div>
+</section>
+
+<!-- ===== 15. Summary ===== -->
+<section class="section" id="summary">
+  <div class="section-num">15 / 核心要点</div>
+  <h2 class="section-title">一图胜千言</h2>
+
+  <div class="diagram">
+<pre>
+  <span class="d-note">╔══════════════════════════════════════════════════════════════════╗</span>
+  <span class="d-note">║</span>                     NanoClaw 架构核心关系图                        <span class="d-note">║</span>
+  <span class="d-note">╚══════════════════════════════════════════════════════════════════╝</span>
+
+  <span class="d-label">频道层</span>   feishu / telegram / discord / slack / whatsapp / ...
+       │         ↑ 自注册 registerChannelAdapter()
+       ↓         ↑ onInbound() / deliver()
+  <span class="d-label">路由层</span>   router.ts
+       │         ├ (channel_type, platform_id) → messaging_group
+       │         ├ engage_mode → agent 是否响应
+       │         ├ access_gate → 权限检查
+       │         └ session_mode → session 隔离级别
+       ↓
+  <span class="d-label">会话层</span>   session-manager.ts
+       │         ├ resolveSession() → 确定 session_id
+       │         ├ writeSessionMessage() → inbound.db
+       │         └ wakeContainer() → 启动/唤醒容器
+       ↓
+  <span class="d-label">容器层</span>   Docker Container
+       │         ├ poll loop → 读 inbound.db
+       │         ├ Claude Agent SDK → resume: continuation
+       │         ├ MCP Tools → 文件/搜索/定时任务
+       │         └ messages_out → outbound.db
+       ↓
+  <span class="d-label">投递层</span>   delivery.ts
+       │         ├ 读 outbound.db → adapter.deliver()
+       │         ├ 标记 delivered → inbound.db
+       │         └ sync processing_ack → messages_in.status
+       ↓
+  <span class="d-label">平台层</span>   用户看到回复 &#127881;
+</pre>
+  </div>
+
+  <div class="card-grid" style="margin-top:2rem;">
+    <div class="card">
+      <div class="card-icon">&#128273;</div>
+      <h3>关键洞察 #1</h3>
+      <p>消息管道（DB）和对话上下文（SDK）是两层独立系统，仅通过 <code>session_state</code> 里的一个 key 松耦合</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#128274;</div>
+      <h3>关键洞察 #2</h3>
+      <p>Session 按<strong>对话</strong>划分不按<strong>用户</strong>划分，群聊里所有人共享上下文</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#128295;</div>
+      <h3>关键洞察 #3</h3>
+      <p>Host 和 Container 通过两个 SQLite 文件通信，seq 偶奇分立避免碰撞</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">&#128737;</div>
+      <h3>关键洞察 #4</h3>
+      <p>Agent 默认隔离在容器内，访问宿主文件需白名单授权</p>
+    </div>
+  </div>
+</section>
+
+</div><!-- /content -->
+
+<div class="footer">
+  <p>NanoClaw Architecture Guide &mdash; 2026.04.29</p>
+  <p style="margin-top:0.5rem; font-size:0.8rem;">Based on project discussion &amp; source code analysis</p>
+</div>
+
+<script>
+// Intersection Observer for scroll animations
+const observer = new IntersectionObserver(
+  (entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+      }
+    });
+  },
+  { threshold: 0.1, rootMargin: '0px 0px -50px 0px' }
+);
+
+document.querySelectorAll('.section').forEach((el) => observer.observe(el));
+
+// Tab switching
+function switchTab(containerId, tabId) {
+  const container = document.getElementById(containerId);
+  const buttons = container.querySelectorAll('.tab-btn');
+  const index = Array.from(buttons).findIndex(b => b.onclick.toString().includes(tabId));
+
+  buttons.forEach((btn, i) => {
+    btn.classList.toggle('active', i === index);
+  });
+
+  const contents = container.parentElement.querySelectorAll('.tab-content');
+  contents.forEach((content, i) => {
+    content.classList.toggle('active', i === index);
+  });
+}
+
+// Active TOC link on scroll
+const sections = document.querySelectorAll('.section[id]');
+const tocLinks = document.querySelectorAll('.toc a');
+
+window.addEventListener('scroll', () => {
+  let current = '';
+  sections.forEach((section) => {
+    const top = section.offsetTop - 200;
+    if (window.scrollY >= top) {
+      current = section.getAttribute('id');
+    }
+  });
+  tocLinks.forEach((link) => {
+    link.classList.toggle('active', link.getAttribute('href') === '#' + current);
+  });
+});
+</script>
+</body>
+</html>

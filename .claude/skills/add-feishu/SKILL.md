@@ -42,8 +42,9 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-feishu
 ```
 
 This deterministically:
-- Adds `src/channels/feishu.ts` (FeishuChannel class with WebSocket event handling and self-registration)
-- Adds `src/channels/feishu.test.ts` (unit tests)
+
+- Adds `src/channels/feishu.ts` (Feishu ChannelAdapter with WebSocket event handling and self-registration via `registerChannelAdapter`)
+- Adds `src/channels/feishu.test.ts` (unit tests for v2 ChannelAdapter interface)
 - Appends `import './feishu.js'` to the channel barrel file `src/channels/index.ts`
 - Installs the `@larksuiteoapi/node-sdk` npm dependency
 - Updates `.env.example` with `FEISHU_APP_ID` and `FEISHU_APP_SECRET`
